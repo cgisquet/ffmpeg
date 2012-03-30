@@ -563,9 +563,8 @@ static void rv40_v_strong_loop_filter(uint8_t *src, const ptrdiff_t stride,
 
 static av_always_inline int rv40_loop_filter_strength(uint8_t *src,
                                                       int step, ptrdiff_t stride,
-                                                      int beta, int beta2,
-                                                      int edge,
-                                                      int *p1, int *q1)
+                                                      int32_t *betas, int edge,
+                                                      int32_t *p1q1)
 {
     int sum_p1p0 = 0, sum_q1q0 = 0, sum_p1p2 = 0, sum_q1q2 = 0;
     int strong0 = 0, strong1 = 0;
@@ -577,10 +576,10 @@ static av_always_inline int rv40_loop_filter_strength(uint8_t *src,
         sum_q1q0 += ptr[ 1*step] - ptr[ 0*step];
     }
 
-    *p1 = FFABS(sum_p1p0) < (beta << 2);
-    *q1 = FFABS(sum_q1q0) < (beta << 2);
+    p1q1[0] = FFABS(sum_p1p0) < betas[0];
+    p1q1[1] = FFABS(sum_q1q0) < betas[0];
 
-    if(!*p1 && !*q1)
+    if(!(p1q1[0]|p1q1[1]))
         return 0;
 
     if (!edge)
@@ -591,24 +590,22 @@ static av_always_inline int rv40_loop_filter_strength(uint8_t *src,
         sum_q1q2 += ptr[ 1*step] - ptr[ 2*step];
     }
 
-    strong0 = *p1 && (FFABS(sum_p1p2) < beta2);
-    strong1 = *q1 && (FFABS(sum_q1q2) < beta2);
+    strong0 = p1q1[0] && (FFABS(sum_p1p2) < betas[1]);
+    strong1 = p1q1[1] && (FFABS(sum_q1q2) < betas[1]);
 
     return strong0 && strong1;
 }
 
 static int rv40_h_loop_filter_strength(uint8_t *src, ptrdiff_t stride,
-                                       int beta, int beta2, int edge,
-                                       int *p1, int *q1)
+                                       int32_t *betas, int edge, int32_t *p1q1)
 {
-    return rv40_loop_filter_strength(src, stride, 1, beta, beta2, edge, p1, q1);
+    return rv40_loop_filter_strength(src, stride, 1, betas, edge, p1q1);
 }
 
 static int rv40_v_loop_filter_strength(uint8_t *src, ptrdiff_t stride,
-                                       int beta, int beta2, int edge,
-                                       int *p1, int *q1)
+                                       int32_t *betas, int edge, int32_t *p1q1)
 {
-    return rv40_loop_filter_strength(src, 1, stride, beta, beta2, edge, p1, q1);
+    return rv40_loop_filter_strength(src, 1, stride, betas, edge, p1q1);
 }
 
 av_cold void ff_rv40dsp_init(RV34DSPContext *c)

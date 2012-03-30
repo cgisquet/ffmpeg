@@ -51,8 +51,7 @@ typedef void (*rv40_strong_loop_filter_func)(uint8_t *src, ptrdiff_t stride,
                                              int dmode, int chroma);
 
 typedef int (*rv40_loop_filter_strength_func)(uint8_t *src, ptrdiff_t stride,
-                                              int beta, int beta2, int edge,
-                                              int *p1, int *q1);
+                                              int32_t *betas, int edge, int32_t *p1q1);
 
 typedef struct RV34DSPContext {
     qpel_mc_func put_pixels_tab[4][16];
