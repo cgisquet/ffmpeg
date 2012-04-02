@@ -301,11 +301,12 @@ enum RV40BlockPos{
 static const int neighbour_offs_x[4] = { 0,  0, -1, 0 };
 static const int neighbour_offs_y[4] = { 0, -1,  0, 1 };
 
-static void rv40_adaptive_loop_filter(RV34DSPContext *rdsp,
-                                      uint8_t *src, int stride, int dmode,
-                                      int lim_q1, int lim_p1,
-                                      int alpha, int beta, int beta2,
-                                      int chroma, int edge, int dir)
+static av_always_inline void
+rv40_adaptive_loop_filter(RV34DSPContext *rdsp,
+                          uint8_t *src, int stride, int dmode,
+                          int lim_q1, int lim_p1,
+                          int alpha, int beta, int beta2,
+                          int chroma, int edge, int dir)
 {
     int32_t betas[2] = { beta*4, beta2 };
     int32_t p1q1[2];
