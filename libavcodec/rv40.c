@@ -312,7 +312,7 @@ static void rv40_adaptive_loop_filter(RV34DSPContext *rdsp,
     int strong;
     int lims;
 
-    strong = rdsp->rv40_loop_filter_strength[dir](src, stride, betas, edge, p1q1);
+    strong = rdsp->rv40_loop_filter_strength[dir][edge](src, stride, betas, p1q1);
 
     lims = p1q1[0] + p1q1[1] + ((lim_q1 + lim_p1) >> 1) + 1;
 

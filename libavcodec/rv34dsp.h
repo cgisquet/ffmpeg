@@ -51,7 +51,7 @@ typedef void (*rv40_strong_loop_filter_func)(uint8_t *src, ptrdiff_t stride,
                                              int dmode, int chroma);
 
 typedef int (*rv40_loop_filter_strength_func)(uint8_t *src, ptrdiff_t stride,
-                                              int32_t *betas, int edge, int32_t *p1q1);
+                                              int32_t *betas, int32_t *p1q1);
 
 typedef struct RV34DSPContext {
     qpel_mc_func put_pixels_tab[4][16];
@@ -70,7 +70,7 @@ typedef struct RV34DSPContext {
     rv34_idct_dc_add_func rv34_idct_dc_add;
     rv40_weak_loop_filter_func rv40_weak_loop_filter[2];
     rv40_strong_loop_filter_func rv40_strong_loop_filter[2];
-    rv40_loop_filter_strength_func rv40_loop_filter_strength[2];
+    rv40_loop_filter_strength_func rv40_loop_filter_strength[2][2];
 } RV34DSPContext;
 
 void ff_rv30dsp_init(RV34DSPContext *c);

@@ -579,10 +579,10 @@ static av_always_inline int rv40_loop_filter_strength(uint8_t *src,
     p1q1[0] = FFABS(sum_p1p0) < betas[0];
     p1q1[1] = FFABS(sum_q1q0) < betas[0];
 
-    if(!(p1q1[0]|p1q1[1]))
+    if (!edge)
         return 0;
 
-    if (!edge)
+    if(!(p1q1[0]|p1q1[1]))
         return 0;
 
     for (i = 0, ptr = src; i < 4; i++, ptr += stride) {
@@ -596,16 +596,28 @@ static av_always_inline int rv40_loop_filter_strength(uint8_t *src,
     return strong0 && strong1;
 }
 
-static int rv40_h_loop_filter_strength(uint8_t *src, ptrdiff_t stride,
-                                       int32_t *betas, int edge, int32_t *p1q1)
+static int rv40_h_loop_filter_strength_ne(uint8_t *src, ptrdiff_t stride,
+                                          int32_t *betas, int32_t *p1q1)
 {
-    return rv40_loop_filter_strength(src, stride, 1, betas, edge, p1q1);
+    return rv40_loop_filter_strength(src, stride, 1, betas, 0, p1q1);
 }
 
-static int rv40_v_loop_filter_strength(uint8_t *src, ptrdiff_t stride,
-                                       int32_t *betas, int edge, int32_t *p1q1)
+static int rv40_v_loop_filter_strength_ne(uint8_t *src, ptrdiff_t stride,
+                                          int32_t *betas, int32_t *p1q1)
 {
-    return rv40_loop_filter_strength(src, 1, stride, betas, edge, p1q1);
+    return rv40_loop_filter_strength(src, 1, stride, betas, 0, p1q1);
+}
+
+static int rv40_h_loop_filter_strength_e(uint8_t *src, ptrdiff_t stride,
+                                         int32_t *betas, int32_t *p1q1)
+{
+    return rv40_loop_filter_strength(src, stride, 1, betas, 1, p1q1);
+}
+
+static int rv40_v_loop_filter_strength_e(uint8_t *src, ptrdiff_t stride,
+                                         int32_t *betas, int32_t *p1q1)
+{
+    return rv40_loop_filter_strength(src, 1, stride, betas, 1, p1q1);
 }
 
 av_cold void ff_rv40dsp_init(RV34DSPContext *c)
@@ -694,8 +706,10 @@ av_cold void ff_rv40dsp_init(RV34DSPContext *c)
     c->rv40_weak_loop_filter[1]     = rv40_v_weak_loop_filter;
     c->rv40_strong_loop_filter[0]   = rv40_h_strong_loop_filter;
     c->rv40_strong_loop_filter[1]   = rv40_v_strong_loop_filter;
-    c->rv40_loop_filter_strength[0] = rv40_h_loop_filter_strength;
-    c->rv40_loop_filter_strength[1] = rv40_v_loop_filter_strength;
+    c->rv40_loop_filter_strength[0][0] = rv40_h_loop_filter_strength_ne;
+    c->rv40_loop_filter_strength[1][0] = rv40_v_loop_filter_strength_ne;
+    c->rv40_loop_filter_strength[0][1] = rv40_h_loop_filter_strength_e;
+    c->rv40_loop_filter_strength[1][1] = rv40_v_loop_filter_strength_e;
 
     if (ARCH_AARCH64)
         ff_rv40dsp_init_aarch64(c);
