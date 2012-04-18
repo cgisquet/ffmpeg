@@ -204,10 +204,15 @@ DEFINE_FN(avg, 8, ssse3)
 DEFINE_FN(avg, 16, sse2)
 DEFINE_FN(avg, 16, ssse3)
 
-int ff_rv40_v_loop_filter_strength_mmx2(uint8_t *src, ptrdiff_t stride,
-                                        int32_t *betas, int edge, int32_t *p1q1);
-int ff_rv40_h_loop_filter_strength_mmx2(uint8_t *src, ptrdiff_t stride,
-                                        int32_t *betas, int edge, int32_t *p1q1);
+int ff_rv40_v_loop_filter_strength_ne_mmx2(uint8_t *src, ptrdiff_t stride,
+                                           int32_t *betas, int32_t *p1q1);
+int ff_rv40_h_loop_filter_strength_ne_mmx2(uint8_t *src, ptrdiff_t stride,
+                                           int32_t *betas, int32_t *p1q1);
+int ff_rv40_v_loop_filter_strength_e_mmx2(uint8_t *src, ptrdiff_t stride,
+                                          int32_t *betas, int32_t *p1q1);
+int ff_rv40_h_loop_filter_strength_e_mmx2(uint8_t *src, ptrdiff_t stride,
+                                          int32_t *betas, int32_t *p1q1);
+
 #endif /* HAVE_YASM */
 
 #if HAVE_MMX_INLINE
@@ -253,8 +258,10 @@ av_cold void ff_rv40dsp_init_x86(RV34DSPContext *c)
         c->rv40_weight_pixels_tab[0][1] = ff_rv40_weight_func_rnd_8_mmxext;
         c->rv40_weight_pixels_tab[1][0] = ff_rv40_weight_func_nornd_16_mmxext;
         c->rv40_weight_pixels_tab[1][1] = ff_rv40_weight_func_nornd_8_mmxext;
-        c->rv40_loop_filter_strength[0] = ff_rv40_h_loop_filter_strength_mmx2;
-        c->rv40_loop_filter_strength[1] = ff_rv40_v_loop_filter_strength_mmx2;
+        c->rv40_loop_filter_strength[0][0] = ff_rv40_h_loop_filter_strength_ne_mmx2;
+        c->rv40_loop_filter_strength[1][0] = ff_rv40_v_loop_filter_strength_ne_mmx2;
+        c->rv40_loop_filter_strength[0][1] = ff_rv40_h_loop_filter_strength_e_mmx2;
+        c->rv40_loop_filter_strength[1][1] = ff_rv40_v_loop_filter_strength_e_mmx2;
 #if ARCH_X86_32
         QPEL_MC_SET(avg_, _mmxext)
 #endif

@@ -79,13 +79,10 @@ SECTION .text
 ;-----------------------------------------------------------------------------
 ; loop filter strength functions:
 ; rv40_loop_filter_strength(uint8_t *src, ptrdiff_t stride,
-;                           int32_t* betas, int edge, int32_t *p1q1);
-; x86_32: all params on stack
-; win64:  rcx,rdx,r8,r9, stack
-; rest: rdi,rsi,rdx,rcx,r8,r9,...
+;                           int32_t* betas, int32_t *p1q1);
 ;-----------------------------------------------------------------------------
 INIT_MMX mmx2
-cglobal rv40_v_loop_filter_strength, 2,2,0, src, stride, betas, edge, p1q1
+cglobal rv40_v_loop_filter_strength_e, 2,2,0, src, stride, betas, p1q1
     pxor        mm0, mm0
     movq        mm5, [pw_mask]
     movd        mm1, [srcq+0*strideq-3]
@@ -122,7 +119,7 @@ cglobal rv40_v_loop_filter_strength, 2,2,0, src, stride, betas, edge, p1q1
     por         mm5, mm3            ; p[-3] p[ 2] | p[-1] p[ 0]
 %if ARCH_X86_32
     mov        srcq, betasm
-%define betas  srcq
+%define betasq  srcq
 %endif
     psubusw     mm1, mm5            ;  p1p2  q1q2 |  p1p0  q1q0
     movq        mm3, [betasq]       ;    0    4b  |    0    b2
@@ -131,30 +128,62 @@ cglobal rv40_v_loop_filter_strength, 2,2,0, src, stride, betas, edge, p1q1
     por         mm5, mm1            ; |p1p2|q1q2| | |p1p0|q1q0|
     pcmpgtw     mm3, mm5            ; p12<b2 q12<b2 | p10<4b q10<4b
 %if ARCH_X86_32
-    mov        srcq, edgem
-    mov     strideq, p1q1m
-%define p1q1q  strideq
-%elif WIN64
-    mov     strideq, p1q1m
-%define p1q1q  strideq
+    mov        srcq, p1q1m
+%define p1q1q  srcq
 %endif
     movq        mm2, mm3
     pshufw      mm3, mm3, 11111010b
-    cmp       edgeq, 0
     psrld       mm3, 31
-    movq    [p1q1q], mm3
-    jz          .ret0
     pshufw      mm2, mm2, 0101b
+    movq    [p1q1q], mm3
     pand        mm2, mm3
     pshufw      mm0, mm2, 10b
     pand        mm0, mm2
     movd        rax, mm0
     REP_RET
-.ret0:
+
+cglobal rv40_v_loop_filter_strength_ne, 2,2,0, src, stride, betas, p1q1
+    pxor        mm0, mm0
+    movd        mm1, [srcq+0*strideq-2] ; p[-2] p[-1] | p[ 0] p[ 1]
+    movd        mm2, [srcq+1*strideq-2]
+    lea        srcq, [srcq+2*strideq]
+    punpcklbw   mm1, mm0
+    punpcklbw   mm2, mm0
+    movd        mm3, [srcq+0*strideq-2]
+    movd        mm4, [srcq+1*strideq-2]
+    punpcklbw   mm3, mm0
+    punpcklbw   mm4, mm0
+    paddw       mm1, mm3
+    paddw       mm2, mm4
+    paddw       mm1, mm2
+
+    ; Now check thresholds
+%if ARCH_X86_32
+    mov        srcq, betasm
+%define betasq  srcq
+%endif
+    ; Now check thresholds
+    pshufw      mm3, mm1, 11110000b     ; p[-2] p[-2] | p[ 1] p[ 1]
+    pshufw      mm2, mm1, 10100101b     ; p[-1] p[-1] | p[ 0] p[ 0]
+    movq        mm4, mm3
+    movd        mm0, [betasq]           ;   0    b2
+    psubusw     mm3, mm2
+    psubusw     mm2, mm4
+    pshufw      mm0, mm0, 0
+    por         mm2, mm3
+
+    pcmpgtw     mm0, mm2            ; p12<b2 q12<b2 | p10<4b q10<4b
+%if ARCH_X86_32
+    mov     strideq, p1q1m
+%define p1q1q   strideq
+%endif
+    psrld       mm0, 31
+    movq    [p1q1q], mm0
     xor         rax, rax
     REP_RET
 
-cglobal rv40_h_loop_filter_strength, 3,3,0, src, stride, betas, edge, p1q1
+%macro H_LOOP_FILTER  1
+cglobal rv40_h_loop_filter_strength_%1, 3,3,0, src, stride, betas, p1q1
     pxor        mm0, mm0
     movd        mm1, [srcq+0*strideq] ; p[0]
     movd        mm2, [srcq+1*strideq] ; p[1]
@@ -170,26 +199,22 @@ cglobal rv40_h_loop_filter_strength, 3,3,0, src, stride, betas, edge, p1q1
     punpcklwd   mm4, mm2              ; p[-2] p[ 1]
     movq        mm5, mm4
     movd        mm1, [betasq]         ;   0    4b
+%ifidn %1, e
     movd        mm6, [betasq+4]
+%endif
     psubusw     mm5, mm3
     psubusw     mm3, mm4
     punpcklwd   mm1, mm1              ;  4b    4b
-%if ARCH_X86_32
-    mov      betasq, edgem
-%define edgeq   betasq
-%endif
     por         mm5, mm3
     pcmpgtw     mm1, mm5
-    cmp       edgeq, 0
-    psrlw       mm1, 15
-%if ARCH_X86_32+WIN64
+%if ARCH_X86_32
     mov      betasq, p1q1m
 %define p1q1q   betasq
 %endif
+    psrlw       mm1, 15
     pshufw      mm3, mm1, 10011000b
     movq    [p1q1q], mm3
-    jz          .ret0
-
+%ifidn %1, e
     movd        mm2, [srcq+2*strideq] ; p[-3]
     neg         strideq
     psadbw      mm2, mm0
@@ -207,11 +232,13 @@ cglobal rv40_h_loop_filter_strength, 3,3,0, src, stride, betas, edge, p1q1
     pshufw      mm1, mm6, 1001b
     pand        mm1, mm6
     movd        eax, mm1
-    REP_RET
-.ret0:
+%else
     xor         rax, rax
+%endif
     REP_RET
-
+%endmacro
+H_LOOP_FILTER ne
+H_LOOP_FILTER e
 
 ;-----------------------------------------------------------------------------
 ; subpel MC functions:
