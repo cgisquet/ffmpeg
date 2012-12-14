@@ -71,18 +71,18 @@ static const void * const iirtable[5] = { &ff_mlp_iirorder_0, &ff_mlp_iirorder_1
 
 #if ARCH_X86_64
 
-#define MLPMUL(label, offset, offs, offc)   \
-    LABEL_MANGLE(label)":             \n\t" \
-    "movslq "offset"+"offs"(%0), %%rax\n\t" \
-    "movslq "offset"+"offc"(%1), %%rdx\n\t" \
-    "imul                 %%rdx, %%rax\n\t" \
-    "add                  %%rax, %%rsi\n\t"
+#define MLPMUL(label, offset, offs, offc)     \
+    LABEL_MANGLE(label)":               \n\t" \
+    "movslq 2*"offset"+"offs"(%0), %%rax\n\t" \
+    "movswq   "offset"+"offc"(%1), %%rdx\n\t" \
+    "imul                   %%rdx, %%rax\n\t" \
+    "add                    %%rax, %%rsi\n\t"
 
-#define FIRMULREG(label, offset, firc)\
-    LABEL_MANGLE(label)":       \n\t" \
-    "movslq "#offset"(%0), %%rax\n\t" \
-    "imul        %"#firc", %%rax\n\t" \
-    "add            %%rax, %%rsi\n\t"
+#define FIRMULREG(label, offset, firc)  \
+    LABEL_MANGLE(label)":         \n\t" \
+    "movslq 2*"#offset"(%0), %%rax\n\t" \
+    "imul          %"#firc", %%rax\n\t" \
+    "add              %%rax, %%rsi\n\t"
 
 #define CLEAR_ACCUM                   \
     "xor            %%rsi, %%rsi\n\t"
@@ -96,12 +96,12 @@ static const void * const iirtable[5] = { &ff_mlp_iirorder_0, &ff_mlp_iirorder_1
 
 #else /* if ARCH_X86_32 */
 
-#define MLPMUL(label, offset, offs, offc)  \
-    LABEL_MANGLE(label)":            \n\t" \
-    "mov   "offset"+"offs"(%0), %%eax\n\t" \
-    "imull "offset"+"offc"(%1)       \n\t" \
-    "add                %%eax , %%esi\n\t" \
-    "adc                %%edx , %%ecx\n\t"
+#define MLPMUL(label, offset, offs, offc)    \
+    LABEL_MANGLE(label)":              \n\t" \
+    "movswl  "offset"+"offc"(%1), %%eax\n\t" \
+    "imull 2*"offset"+"offs"(%0)       \n\t" \
+    "add                  %%eax , %%esi\n\t" \
+    "adc                  %%edx , %%ecx\n\t"
 
 #define FIRMULREG(label, offset, firc)  \
     MLPMUL(label, #offset, "0", "0")
@@ -124,12 +124,12 @@ static const void * const iirtable[5] = { &ff_mlp_iirorder_0, &ff_mlp_iirorder_1
 
 #define BINC  AV_STRINGIFY(4* MAX_CHANNELS)
 #define IOFFS AV_STRINGIFY(4*(MAX_FIR_ORDER + MAX_BLOCKSIZE))
-#define IOFFC AV_STRINGIFY(4* MAX_FIR_ORDER)
+#define IOFFC AV_STRINGIFY(2* MAX_FIR_ORDER)
 
 #define FIRMUL(label, offset) MLPMUL(label, #offset,   "0",   "0")
 #define IIRMUL(label, offset) MLPMUL(label, #offset, IOFFS, IOFFC)
 
-static void mlp_filter_channel_x86(int32_t *state, const int32_t *coeff,
+static void mlp_filter_channel_x86(int32_t *state, const int16_t *coeff,
                                    int firorder, int iirorder,
                                    unsigned int filter_shift, int32_t mask,
                                    int blocksize, int32_t *sample_buffer)
@@ -143,19 +143,19 @@ static void mlp_filter_channel_x86(int32_t *state, const int32_t *coeff,
         "1:                           \n\t"
         CLEAR_ACCUM
         "jmp  *%5                     \n\t"
-        FIRMUL   (ff_mlp_firorder_8, 0x1c   )
-        FIRMUL   (ff_mlp_firorder_7, 0x18   )
-        FIRMUL   (ff_mlp_firorder_6, 0x14   )
-        FIRMUL   (ff_mlp_firorder_5, 0x10   )
-        FIRMUL   (ff_mlp_firorder_4, 0x0c   )
-        FIRMUL   (ff_mlp_firorder_3, 0x08   )
-        FIRMUL   (ff_mlp_firorder_2, 0x04   )
+        FIRMUL   (ff_mlp_firorder_8, 0x0E   )
+        FIRMUL   (ff_mlp_firorder_7, 0x0C   )
+        FIRMUL   (ff_mlp_firorder_6, 0x0A   )
+        FIRMUL   (ff_mlp_firorder_5, 0x08   )
+        FIRMUL   (ff_mlp_firorder_4, 0x06   )
+        FIRMUL   (ff_mlp_firorder_3, 0x04   )
+        FIRMUL   (ff_mlp_firorder_2, 0x02   )
         FIRMULREG(ff_mlp_firorder_1, 0x00, 8)
         LABEL_MANGLE(ff_mlp_firorder_0)":\n\t"
         "jmp  *%6                     \n\t"
-        IIRMUL   (ff_mlp_iirorder_4, 0x0c   )
-        IIRMUL   (ff_mlp_iirorder_3, 0x08   )
-        IIRMUL   (ff_mlp_iirorder_2, 0x04   )
+        IIRMUL   (ff_mlp_iirorder_4, 0x06   )
+        IIRMUL   (ff_mlp_iirorder_3, 0x04   )
+        IIRMUL   (ff_mlp_iirorder_2, 0x02   )
         IIRMUL   (ff_mlp_iirorder_1, 0x00   )
         LABEL_MANGLE(ff_mlp_iirorder_0)":\n\t"
         SHIFT_ACCUM

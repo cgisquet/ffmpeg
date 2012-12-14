@@ -81,7 +81,7 @@ typedef struct FilterParams {
 /** sample data coding information */
 typedef struct ChannelParams {
     FilterParams filter_params[NUM_FILTERS];
-    int32_t     coeff[NUM_FILTERS][MAX_FIR_ORDER];
+    int16_t     coeff[NUM_FILTERS][MAX_FIR_ORDER];
 
     int16_t     huff_offset;      ///< Offset to apply to residual values.
     int32_t     sign_huff_offset; ///< sign/rounding-corrected version of huff_offset

@@ -663,7 +663,7 @@ static int read_filter_params(MLPDecodeContext *m, GetBitContext *gbp,
     fp->order = order;
 
     if (order > 0) {
-        int32_t *fcoeff = s->channel_params[channel].coeff[filter];
+        int16_t *fcoeff = s->channel_params[channel].coeff[filter];
         int coeff_bits, coeff_shift;
 
         fp->shift = get_bits(gbp, 4);
@@ -896,7 +896,7 @@ static void filter_channel(MLPDecodeContext *m, unsigned int substr,
                            unsigned int channel)
 {
     SubStream *s = &m->substream[substr];
-    const int32_t *fircoeff = s->channel_params[channel].coeff[FIR];
+    const int16_t *fircoeff = s->channel_params[channel].coeff[FIR];
     int32_t state_buffer[NUM_FILTERS][MAX_BLOCKSIZE + MAX_FIR_ORDER];
     int32_t *firbuf = state_buffer[FIR] + MAX_BLOCKSIZE;
     int32_t *iirbuf = state_buffer[IIR] + MAX_BLOCKSIZE;

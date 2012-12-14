@@ -47,7 +47,7 @@ int32_t ff_mlp_pack_output(int32_t lossless_check_data,
                            int is32);
 
 typedef struct MLPDSPContext {
-    void (*mlp_filter_channel)(int32_t *state, const int32_t *coeff,
+    void (*mlp_filter_channel)(int32_t *state, const int16_t *coeff,
                                int firorder, int iirorder,
                                unsigned int filter_shift, int32_t mask,
                                int blocksize, int32_t *sample_buffer);
