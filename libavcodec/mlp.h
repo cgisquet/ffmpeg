@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 
+#include "libavutil/mem.h"
 #include "avcodec.h"
 
 /** Last possible matrix channel for each codec */
@@ -73,8 +74,8 @@
 /** sample data coding information */
 typedef struct ChannelParams {
     ///< State for both IIR and FIR, with initial padding
-    int32_t     state[2*MAX_BLOCKSIZE+MAX_FIR_ORDER+MAX_IIR_ORDER];
-    int16_t     coeff[NUM_FILTERS][MAX_FIR_ORDER];
+    DECLARE_ALIGNED(16, int32_t, state)[2*MAX_BLOCKSIZE+MAX_FIR_ORDER+MAX_IIR_ORDER];
+    DECLARE_ALIGNED(16, int16_t, coeff)[NUM_FILTERS][MAX_FIR_ORDER];
     uint8_t     order[NUM_FILTERS]; ///< number of taps in filter
     uint8_t     shift[NUM_FILTERS]; ///< Right shift to apply to output of filter
 

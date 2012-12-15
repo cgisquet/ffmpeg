@@ -907,8 +907,8 @@ static void filter_channel(MLPDecodeContext *m, unsigned int substr,
                               c->shift[FIR], mask, s->blocksize,
                               &m->sample_buffer[s->blockpos][channel]);
 
-    AV_COPY128U(fir+4, fir+4 - s->blocksize);
-    AV_COPY128U(fir+0, fir+0 - s->blocksize);
+    AV_COPY128(fir+4, fir+4 - s->blocksize);
+    AV_COPY128(fir+0, fir+0 - s->blocksize);
     AV_COPY128U(iir  , iir   - s->blocksize);
 }
 
