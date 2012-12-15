@@ -70,23 +70,18 @@
 #define FIR 0
 #define IIR 1
 
-/** filter data */
-typedef struct FilterParams {
-    uint8_t     order; ///< number of taps in filter
-    uint8_t     shift; ///< Right shift to apply to output of filter.
-
-    int32_t     state[MAX_FIR_ORDER];
-} FilterParams;
-
 /** sample data coding information */
 typedef struct ChannelParams {
-    FilterParams filter_params[NUM_FILTERS];
+    ///< State for both IIR and FIR, with initial padding
+    int32_t     state[2*MAX_BLOCKSIZE+MAX_FIR_ORDER+MAX_IIR_ORDER];
     int16_t     coeff[NUM_FILTERS][MAX_FIR_ORDER];
+    uint8_t     order[NUM_FILTERS]; ///< number of taps in filter
+    uint8_t     shift[NUM_FILTERS]; ///< Right shift to apply to output of filter
 
-    int16_t     huff_offset;      ///< Offset to apply to residual values.
-    int32_t     sign_huff_offset; ///< sign/rounding-corrected version of huff_offset
-    uint8_t     codebook;         ///< Which VLC codebook to use to read residuals.
-    uint8_t     huff_lsbs;        ///< Size of residual suffix not encoded using VLC.
+    int16_t     huff_offset;        ///< Offset to apply to residual values.
+    int32_t     sign_huff_offset;   ///< sign/rounding-corrected version of huff_offset
+    uint8_t     codebook;           ///< Which VLC codebook to use to read residuals.
+    uint8_t     huff_lsbs;          ///< Size of residual suffix not encoded using VLC.
 } ChannelParams;
 
 /** Tables defining the Huffman codes.

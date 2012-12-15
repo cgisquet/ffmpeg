@@ -595,10 +595,10 @@ static int read_restart_header(MLPDecodeContext *m, GetBitContext *gbp,
 
     for (ch = s->min_channel; ch <= s->max_channel; ch++) {
         ChannelParams *cp = &s->channel_params[ch];
-        cp->filter_params[FIR].order = 0;
-        cp->filter_params[IIR].order = 0;
-        cp->filter_params[FIR].shift = 0;
-        cp->filter_params[IIR].shift = 0;
+        cp->order[FIR] = 0;
+        cp->order[IIR] = 0;
+        cp->shift[FIR] = 0;
+        cp->shift[IIR] = 0;
 
         /* Default audio coding is 24-bit raw PCM. */
         cp->huff_offset      = 0;
@@ -640,7 +640,7 @@ static int read_filter_params(MLPDecodeContext *m, GetBitContext *gbp,
                               unsigned int filter)
 {
     SubStream *s = &m->substream[substr];
-    FilterParams *fp = &s->channel_params[channel].filter_params[filter];
+    ChannelParams *c = s->channel_params + channel;
     const int max_order = filter ? MAX_IIR_ORDER : MAX_FIR_ORDER;
     const char fchar = filter ? 'I' : 'F';
     int i, order;
@@ -660,13 +660,13 @@ static int read_filter_params(MLPDecodeContext *m, GetBitContext *gbp,
                fchar, order, max_order);
         return AVERROR_INVALIDDATA;
     }
-    fp->order = order;
+    c->order[filter] = order;
 
     if (order > 0) {
-        int16_t *fcoeff = s->channel_params[channel].coeff[filter];
+        int16_t *fcoeff = c->coeff[filter];
         int coeff_bits, coeff_shift;
 
-        fp->shift = get_bits(gbp, 4);
+        c->shift[filter] = get_bits(gbp, 4);
 
         coeff_bits  = get_bits(gbp, 5);
         coeff_shift = get_bits(gbp, 3);
@@ -687,6 +687,9 @@ static int read_filter_params(MLPDecodeContext *m, GetBitContext *gbp,
             fcoeff[i] = get_sbits(gbp, coeff_bits) << coeff_shift;
 
         if (get_bits1(gbp)) {
+            int32_t* state = c->state + MAX_BLOCKSIZE /* FIR start */
+                           /* IIR start */
+                           + filter*(MAX_FIR_ORDER + MAX_BLOCKSIZE);
             int state_bits, state_shift;
 
             if (filter == FIR) {
@@ -701,7 +704,7 @@ static int read_filter_params(MLPDecodeContext *m, GetBitContext *gbp,
             /* TODO: Check validity of state data. */
 
             for (i = 0; i < order; i++)
-                fp->state[i] = state_bits ? get_sbits(gbp, state_bits) << state_shift : 0;
+                state[i] = state_bits ? get_sbits(gbp, state_bits) << state_shift : 0;
         }
     }
 
@@ -778,8 +781,6 @@ static int read_channel_params(MLPDecodeContext *m, unsigned int substr,
 {
     SubStream *s = &m->substream[substr];
     ChannelParams *cp = &s->channel_params[ch];
-    FilterParams *fir = &cp->filter_params[FIR];
-    FilterParams *iir = &cp->filter_params[IIR];
     int ret;
 
     if (s->param_presence_flags & PARAM_FIR)
@@ -792,13 +793,13 @@ static int read_channel_params(MLPDecodeContext *m, unsigned int substr,
             if ((ret = read_filter_params(m, gbp, substr, ch, IIR)) < 0)
                 return ret;
 
-    if (fir->order + iir->order > 8) {
+    if (cp->order[FIR] + cp->order[IIR] > 8) {
         av_log(m->avctx, AV_LOG_ERROR, "Total filter orders too high.\n");
         return AVERROR_INVALIDDATA;
     }
 
-    if (fir->order && iir->order &&
-        fir->shift != iir->shift) {
+    if (cp->order[FIR] && cp->order[IIR] &&
+        cp->shift[FIR] != cp->shift[IIR]) {
         av_log(m->avctx, AV_LOG_ERROR,
                 "FIR and IIR filters must use the same precision.\n");
         return AVERROR_INVALIDDATA;
@@ -808,8 +809,8 @@ static int read_channel_params(MLPDecodeContext *m, unsigned int substr,
      * FIR filter is considered. If only the IIR filter is employed,
      * the FIR filter precision is set to that of the IIR filter, so
      * that the filtering code can use it. */
-    if (!fir->order && iir->order)
-        fir->shift = iir->shift;
+    if (!cp->order[FIR] && cp->order[IIR])
+        cp->shift[FIR] = cp->shift[IIR];
 
     if (s->param_presence_flags & PARAM_HUFFOFFSET)
         if (get_bits1(gbp))
@@ -896,25 +897,19 @@ static void filter_channel(MLPDecodeContext *m, unsigned int substr,
                            unsigned int channel)
 {
     SubStream *s = &m->substream[substr];
-    const int16_t *fircoeff = s->channel_params[channel].coeff[FIR];
-    int32_t state_buffer[NUM_FILTERS][MAX_BLOCKSIZE + MAX_FIR_ORDER];
-    int32_t *firbuf = state_buffer[FIR] + MAX_BLOCKSIZE;
-    int32_t *iirbuf = state_buffer[IIR] + MAX_BLOCKSIZE;
-    FilterParams *fir = &s->channel_params[channel].filter_params[FIR];
-    FilterParams *iir = &s->channel_params[channel].filter_params[IIR];
-    unsigned int filter_shift = fir->shift;
+    ChannelParams *c = s->channel_params + channel;
+    int32_t *fir = c->state + MAX_BLOCKSIZE;
+    int32_t *iir = fir + MAX_BLOCKSIZE + MAX_FIR_ORDER;
     int32_t mask = MSB_MASK(s->quant_step_size[channel]);
 
-    memcpy(firbuf, fir->state, MAX_FIR_ORDER * sizeof(int32_t));
-    memcpy(iirbuf, iir->state, MAX_IIR_ORDER * sizeof(int32_t));
-
-    m->dsp.mlp_filter_channel(firbuf, fircoeff,
-                              fir->order, iir->order,
-                              filter_shift, mask, s->blocksize,
+    m->dsp.mlp_filter_channel(fir, c->coeff[FIR],
+                              c->order[FIR], c->order[IIR],
+                              c->shift[FIR], mask, s->blocksize,
                               &m->sample_buffer[s->blockpos][channel]);
 
-    memcpy(fir->state, firbuf - s->blocksize, MAX_FIR_ORDER * sizeof(int32_t));
-    memcpy(iir->state, iirbuf - s->blocksize, MAX_IIR_ORDER * sizeof(int32_t));
+    AV_COPY128U(fir+4, fir+4 - s->blocksize);
+    AV_COPY128U(fir+0, fir+0 - s->blocksize);
+    AV_COPY128U(iir  , iir   - s->blocksize);
 }
 
 /** Read a block of PCM residual data (or actual if no filtering active). */
