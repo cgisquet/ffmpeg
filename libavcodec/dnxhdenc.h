@@ -60,12 +60,13 @@ typedef struct DNXHDEncContext {
 
     int interlaced;
     int cur_field;
+    int is_444;
 
     int nitris_compat;
     unsigned min_padding;
     int intra_quant_bias;
 
-    DECLARE_ALIGNED(16, int16_t, blocks)[8][64];
+    DECLARE_ALIGNED(16, int16_t, blocks)[12][64];
 
     int      (*qmatrix_c)     [64];
     int      (*qmatrix_l)     [64];

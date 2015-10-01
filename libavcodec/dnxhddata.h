@@ -76,7 +76,7 @@ typedef struct CIDEntry {
 extern const CIDEntry ff_dnxhd_cid_table[];
 
 int ff_dnxhd_get_cid_table(int cid);
-int ff_dnxhd_find_cid(AVCodecContext *avctx, int bit_depth);
+int ff_dnxhd_find_cid(AVCodecContext *avctx, int bit_depth, int is_444);
 void ff_dnxhd_print_profiles(AVCodecContext *avctx, int loglevel);
 
 static av_always_inline uint64_t ff_dnxhd_check_header_prefix(uint64_t prefix)

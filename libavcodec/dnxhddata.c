@@ -1141,7 +1141,7 @@ int avpriv_dnxhd_parse_header_version(const uint8_t *buf)
     return DNXHD_VERSION_NONE;
 }
 
-int ff_dnxhd_find_cid(AVCodecContext *avctx, int bit_depth)
+int ff_dnxhd_find_cid(AVCodecContext *avctx, int bit_depth, int is_444)
 {
     int i, j;
     int mbs = avctx->bit_rate / 1000000;
@@ -1150,11 +1150,12 @@ int ff_dnxhd_find_cid(AVCodecContext *avctx, int bit_depth)
     for (i = 0; i < FF_ARRAY_ELEMS(ff_dnxhd_cid_table); i++) {
         const CIDEntry *cid = &ff_dnxhd_cid_table[i];
         int interlaced = cid->flags & DNXHD_INTERLACED ? 1 : 0;
+        int cid444 = cid->flags & DNXHD_444 ? 1 : 0;
         if (cid->width == avctx->width && cid->height == avctx->height &&
             interlaced == !!(avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) &&
-            !(cid->flags & DNXHD_444) && cid->bit_depth == bit_depth) {
+            cid444 == is_444 && cid->bit_depth == bit_depth) {
             if (avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL &&
-                cid->flags & DNXHD_MBAFF) {
+                (cid->flags & DNXHD_MBAFF || cid444)) {
                 av_log(avctx, AV_LOG_WARNING, "Profile selected is experimental\n");
                 continue;
             }
@@ -1176,9 +1177,10 @@ void ff_dnxhd_print_profiles(AVCodecContext *avctx, int loglevel)
             if (!cid->bit_rates[j])
                 break;
 
-            av_log(avctx, loglevel, "Frame size: %dx%d%c; bitrate: %dMbps; pixel format: %s; framerate: %d/%d\n",
+            av_log(avctx, loglevel, "Frame size: %dx%d%c; bitrate: %dMbps; pixel format: yuv4%sp%d; framerate: %d/%d\n",
                    cid->width, cid->height, cid->flags & DNXHD_INTERLACED ? 'i' : 'p', cid->bit_rates[j],
-                   cid->bit_depth == 10 ? "yuv422p10" : "yuv422p", cid->frame_rates[j].num, cid->frame_rates[j].den);
+                   cid->flags & DNXHD_444 ? "44" : "22", cid->bit_depth,
+                   cid->frame_rates[j].num, cid->frame_rates[j].den);
         }
     }
 }
