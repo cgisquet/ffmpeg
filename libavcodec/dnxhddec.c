@@ -165,15 +165,15 @@ static int dnxhd_decode_header(DNXHDContext *ctx, AVFrame *frame,
 {
     int i, cid, ret;
     int old_bit_depth = ctx->bit_depth, bitdepth;
-    uint64_t header_prefix;
+    int version;
     if (buf_size < 0x280) {
         av_log(ctx->avctx, AV_LOG_ERROR,
                "buffer too small (%d < 640).\n", buf_size);
         return AVERROR_INVALIDDATA;
     }
 
-    header_prefix = avpriv_dnxhd_parse_header_prefix(buf);
-    if (header_prefix == 0) {
+    version = avpriv_dnxhd_parse_header_version(buf);
+    if (version == DNXHD_VERSION_NONE) {
         av_log(ctx->avctx, AV_LOG_ERROR,
                "unknown header 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\n",
                buf[0], buf[1], buf[2], buf[3], buf[4]);
@@ -275,7 +275,7 @@ static int dnxhd_decode_header(DNXHDContext *ctx, AVFrame *frame,
            ctx->bit_depth, ctx->mbaff, ctx->act);
 
     // Newer format supports variable mb_scan_index sizes
-    if (header_prefix == DNXHD_HEADER_HR2) {
+    if (version == DNXHD_VERSION_HR2) {
         ctx->data_offset = 0x170 + (ctx->mb_height << 2);
     } else {
         if (ctx->mb_height > 68 ||

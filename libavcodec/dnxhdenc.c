@@ -422,11 +422,10 @@ fail:  // for FF_ALLOCZ_OR_GOTO
 static int dnxhd_write_header(AVCodecContext *avctx, uint8_t *buf)
 {
     DNXHDEncContext *ctx = avctx->priv_data;
-    static const uint8_t header_prefix[5] = { 0x00, 0x00, 0x02, 0x80, 0x01 };
 
     memset(buf, 0, 640);
 
-    memcpy(buf, header_prefix, 5);
+    memcpy(buf, ff_dnxhd_headers[ctx->cid_table->version], 5);
     buf[5] = ctx->interlaced ? ctx->cur_field + 2 : 0x01;
     buf[6] = 0x80; // crc flag off
     buf[7] = 0xa0; // reserved

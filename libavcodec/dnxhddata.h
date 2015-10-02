@@ -40,11 +40,25 @@
 /** Indicate that a CIDEntry value must be read in the bitstream */
 #define DNXHD_VARIABLE 0
 
+/** Known header versions */
+typedef enum {
+    DNXHD_VERSION_NONE       = -1,
+    DNXHD_VERSION_INITIAL    = 0,
+    DNXHD_VERSION_444        = 1,
+    DNXHD_VERSION_HR1        = 2,
+    DNXHD_VERSION_HR2        = 3,
+    DNXHD_NUMBER_VERSIONS
+} DNxHD_Header;
+
+/** Known header version strings */
+extern const uint8_t ff_dnxhd_headers[DNXHD_NUMBER_VERSIONS][5];
+
 typedef struct CIDEntry {
     int cid;
     unsigned int width, height;
     unsigned int frame_size;
     unsigned int coding_unit_size;
+    DNxHD_Header version;
     uint16_t flags;
     int index_bits;
     int bit_depth;
@@ -77,5 +91,5 @@ static av_always_inline uint64_t ff_dnxhd_check_header_prefix(uint64_t prefix)
 
 int avpriv_dnxhd_get_frame_size(int cid);
 int avpriv_dnxhd_get_interlaced(int cid);
-uint64_t avpriv_dnxhd_parse_header_prefix(const uint8_t *buf);
+int avpriv_dnxhd_parse_header_version(const uint8_t *buf);
 #endif /* AVCODEC_DNXHDDATA_H */
