@@ -285,6 +285,11 @@ fail:
     return AVERROR(ENOMEM);
 }
 
+static void dnxhd_unquantize8(const DNXHDEncContext *ctx, int16_t *block,
+                              int n, int qscale, int last_index);
+static void dnxhd_unquantize10(const DNXHDEncContext *ctx, int16_t *block,
+                               int n, int qscale, int last_index);
+
 static av_cold int dnxhd_encode_init(AVCodecContext *avctx)
 {
     DNXHDEncContext *ctx = avctx->priv_data;
@@ -292,9 +297,11 @@ static av_cold int dnxhd_encode_init(AVCodecContext *avctx)
 
     switch (avctx->pix_fmt) {
     case AV_PIX_FMT_YUV422P:
+        ctx->unquantize = dnxhd_unquantize8;
         bit_depth = 8;
         break;
     case AV_PIX_FMT_YUV422P10:
+        ctx->unquantize = dnxhd_unquantize10;
         bit_depth = 10;
         break;
     default:
@@ -484,11 +491,11 @@ void dnxhd_encode_block(DNXHDEncContext *ctx, int16_t *block,
 }
 
 static av_always_inline
-void dnxhd_unquantize_c(DNXHDEncContext *ctx, int16_t *block, int n,
-                        int qscale, int last_index)
+void dnxhd_unquantize(const DNXHDEncContext *ctx, int16_t *block,
+                      int n, int qscale, int last_index, int scale)
 {
     const uint8_t *weight_matrix;
-    int level;
+    int level, offset = 1<<(scale-1);
     int i;
 
     weight_matrix = (n & 2) ? ctx->cid_table->chroma_weight
@@ -500,31 +507,33 @@ void dnxhd_unquantize_c(DNXHDEncContext *ctx, int16_t *block, int n,
         if (level) {
             if (level < 0) {
                 level = (1 - 2 * level) * qscale * weight_matrix[i];
-                if (ctx->cid_table->bit_depth == 10) {
-                    if (weight_matrix[i] != 8)
-                        level += 8;
-                    level >>= 4;
-                } else {
-                    if (weight_matrix[i] != 32)
-                        level += 32;
-                    level >>= 6;
-                }
+                if (weight_matrix[i] != offset)
+                    level += offset;
+                level >>= scale;
                 level = -level;
             } else {
                 level = (2 * level + 1) * qscale * weight_matrix[i];
-                if (ctx->cid_table->bit_depth == 10) {
-                    if (weight_matrix[i] != 8)
-                        level += 8;
-                    level >>= 4;
-                } else {
-                    if (weight_matrix[i] != 32)
-                        level += 32;
-                    level >>= 6;
-                }
+                if (weight_matrix[i] != offset)
+                    level += offset;
+                level >>= scale;
             }
             block[j] = level;
         }
     }
+}
+
+static void
+dnxhd_unquantize8(const DNXHDEncContext *ctx, int16_t *block,
+                  int n, int qscale, int last_index)
+{
+    dnxhd_unquantize(ctx, block, n, qscale, last_index, 6);
+}
+
+static void
+dnxhd_unquantize10(const DNXHDEncContext *ctx, int16_t *block,
+                   int n, int qscale, int last_index)
+{
+    dnxhd_unquantize(ctx, block, n, qscale, last_index, 4);
 }
 
 static av_always_inline int dnxhd_ssd_block(int16_t *qblock, int16_t *block)
@@ -656,7 +665,7 @@ static int dnxhd_calc_bits_thread(AVCodecContext *avctx, void *arg,
             ctx->m.last_dc[n] = block[0];
 
             if (avctx->mb_decision == FF_MB_DECISION_RD || !RC_VARIANCE) {
-                dnxhd_unquantize_c(ctx, block, i, qscale, last_index);
+                ctx->unquantize(ctx, block, i, qscale, last_index);
                 ctx->m.idsp.idct(block);
                 ssd += dnxhd_ssd_block(block, src_block);
             }

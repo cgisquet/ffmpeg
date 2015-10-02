@@ -93,6 +93,8 @@ typedef struct DNXHDEncContext {
 
     void (*get_pixels_8x4_sym)(int16_t * /* align 16 */,
                                const uint8_t *, ptrdiff_t);
+    void (*unquantize)(const struct DNXHDEncContext *ctx, int16_t *block,
+                       int n, int qscale, int last_index);
 } DNXHDEncContext;
 
 void ff_dnxhdenc_init_x86(DNXHDEncContext *ctx);
