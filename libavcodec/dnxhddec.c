@@ -270,9 +270,9 @@ static int dnxhd_decode_header(DNXHDContext *ctx, AVFrame *frame,
     if ((ctx->height + 15) >> 4 == ctx->mb_height && frame->interlaced_frame)
         ctx->height <<= 1;
 
-    av_log(ctx->avctx, AV_LOG_VERBOSE, "%dx%d, 4:%s %d bits, MBAFF=%d ACT=%d\n",
-           ctx->width, ctx->height, ctx->is_444 ? "4:4" : "2:2",
-           ctx->bit_depth, ctx->mbaff, ctx->act);
+    av_log(ctx->avctx, AV_LOG_VERBOSE, "%dx%d%c, 4:%s %d bits, MBAFF=%d ACT=%d (v%d)\n",
+           ctx->width, ctx->height, buf[5] & 2 ? 'i' : 'p', ctx->is_444 ? "4:4" : "2:2",
+           ctx->bit_depth, ctx->mbaff, ctx->act, version);
 
     // Newer format supports variable mb_scan_index sizes
     if (version == DNXHD_VERSION_HR2) {
