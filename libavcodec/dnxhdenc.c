@@ -24,6 +24,7 @@
  */
 
 #include "libavutil/attributes.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/timer.h"
@@ -49,6 +50,8 @@ static const AVOption options[] = {
     { "ibias", "intra quant bias",
         offsetof(DNXHDEncContext, intra_quant_bias), AV_OPT_TYPE_INT,
         { .i64 = 0 }, INT_MIN, INT_MAX, VE },
+    { "cid", "CID profile", offsetof(DNXHDEncContext, cid), AV_OPT_TYPE_INT,
+        { .i64 = 0 }, 0, 1274, VE }, // hard-coded and holes so...
     { NULL }
 };
 
@@ -208,7 +211,7 @@ static av_cold int dnxhd_init_qmat(DNXHDEncContext *ctx, int lbias, int cbias)
                       (ctx->m.avctx->qmax + 1), 64 * 2 * sizeof(uint16_t),
                       fail);
 
-    if (ctx->cid_table->bit_depth == 8) {
+    if (ctx->m.avctx->bits_per_raw_sample == 8) {
         for (i = 1; i < 64; i++) {
             int j = ctx->m.idsp.idct_permutation[ff_zigzag_direct[i]];
             weight_matrix[j] = ctx->cid_table->luma_weight[i];
@@ -315,6 +318,31 @@ static av_cold int dnxhd_encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+    if (ctx->cid) {
+        if (avctx->width&15 || avctx->height&7) {
+            av_log(avctx, AV_LOG_ERROR, "Dimensions %dx%d not yet handled\n",
+                   avctx->width, avctx->height);
+            return AVERROR(EINVAL);
+        }
+
+        if ((index = ff_dnxhd_get_cid_table(ctx->cid)) == -1) {
+            av_log(avctx, AV_LOG_ERROR, "No profile of CID %d\n", ctx->cid);
+            return AVERROR(EINVAL);
+        }
+        index = ff_dnxhd_get_cid_table(ctx->cid);
+        ctx->cid_table = &ff_dnxhd_cid_table[index];
+
+        if ((ctx->cid_table->width != avctx->width && ctx->cid_table->width != DNXHD_VARIABLE) ||
+            (ctx->cid_table->height != avctx->height && ctx->cid_table->height != DNXHD_VARIABLE) ||
+            (is_444 != (ctx->cid_table->flags & DNXHD_444 ? 1 : 0)) ||
+             // 12bits not handled and 8bits not affected
+            (ctx->cid_table->bit_depth != bit_depth && bit_depth == 10
+             && ctx->cid_table->bit_depth != DNXHD_VARIABLE)) {
+            av_log(avctx, AV_LOG_ERROR, "Frame %dx%d %s not handled by CID %d\n",
+                   avctx->width, avctx->height, av_get_pix_fmt_name(avctx->pix_fmt), ctx->cid);
+            return AVERROR(EINVAL);
+        }
+    } else {
     ctx->cid = ff_dnxhd_find_cid(avctx, bit_depth, is_444);
     if (!ctx->cid) {
         av_log(avctx, AV_LOG_ERROR,
@@ -328,12 +356,14 @@ static av_cold int dnxhd_encode_init(AVCodecContext *avctx)
     av_assert0(index >= 0);
 
     ctx->cid_table = &ff_dnxhd_cid_table[index];
+    }
     ctx->is_444    = is_444;
 
     ctx->m.avctx    = avctx;
     ctx->m.mb_intra = 1;
     ctx->m.h263_aic = 1;
 
+    if (ctx->cid_table->bit_depth != DNXHD_VARIABLE)
     avctx->bits_per_raw_sample = ctx->cid_table->bit_depth;
 
     ff_blockdsp_init(&ctx->bdsp, avctx);
@@ -346,7 +376,7 @@ static av_cold int dnxhd_encode_init(AVCodecContext *avctx)
     if (!ctx->m.dct_quantize)
         ctx->m.dct_quantize = ff_dct_quantize_c;
 
-    if (ctx->cid_table->bit_depth == 10) {
+    if (avctx->bits_per_raw_sample == 10) {
         ctx->m.dct_quantize     = dnxhd_10bit_dct_quantize;
         ctx->get_pixels_8x4_sym = dnxhd_10bit_get_pixels_8x4_sym;
         ctx->block_width_l2     = 4;
@@ -428,10 +458,14 @@ fail:  // for FF_ALLOCZ_OR_GOTO
 static int dnxhd_write_header(AVCodecContext *avctx, uint8_t *buf)
 {
     DNXHDEncContext *ctx = avctx->priv_data;
+    int version = ctx->cid_table->version;
 
     memset(buf, 0, 640);
 
-    memcpy(buf, ff_dnxhd_headers[ctx->cid_table->version], 5);
+    if (version == DNXHD_VERSION_HR2 && avctx->bits_per_raw_sample < 12 &&
+        ctx->cid_table->bit_depth == DNXHD_VARIABLE)
+        version = DNXHD_VERSION_HR1;
+    memcpy(buf, ff_dnxhd_headers[version], 5);
     buf[5] = ctx->interlaced ? ctx->cur_field + 2 : 0x01;
     buf[6] = 0x80; // crc flag off
     buf[7] = 0xa0; // reserved
@@ -439,7 +473,7 @@ static int dnxhd_write_header(AVCodecContext *avctx, uint8_t *buf)
     AV_WB16(buf + 0x1a, avctx->width);  // SPL
     AV_WB16(buf + 0x1d, avctx->height >> ctx->interlaced); // NAL
 
-    buf[0x21] = ctx->cid_table->bit_depth == 10 ? 0x58 : 0x38;
+    buf[0x21] = avctx->bits_per_raw_sample == 10 ? 0x58 : 0x38;
     buf[0x22] = 0x88 + (ctx->interlaced << 2);
     AV_WB32(buf + 0x28, ctx->cid); // CID
     buf[0x2c] = (!ctx->interlaced << 7) | (ctx->is_444 << 6)
@@ -678,7 +712,7 @@ static int dnxhd_calc_bits_thread(AVCodecContext *avctx, void *arg,
 
     ctx->m.last_dc[0] =
     ctx->m.last_dc[1] =
-    ctx->m.last_dc[2] = 1 << (ctx->cid_table->bit_depth + 2);
+    ctx->m.last_dc[2] = 1 << (avctx->bits_per_raw_sample + 2);
 
     for (mb_x = 0; mb_x < ctx->m.mb_width; mb_x++) {
         unsigned mb = mb_y * ctx->m.mb_width + mb_x;
@@ -710,7 +744,7 @@ static int dnxhd_calc_bits_thread(AVCodecContext *avctx, void *arg,
             else
                 nbits = av_log2_16bit(2 * diff);
 
-            av_assert1(nbits < ctx->cid_table->bit_depth + 4);
+            av_assert1(nbits < avctx->bits_per_raw_sample + 4);
             dc_bits += ctx->cid_table->dc_bits[nbits] + nbits;
 
             ctx->m.last_dc[n] = block[0];
@@ -739,7 +773,7 @@ static int dnxhd_encode_thread(AVCodecContext *avctx, void *arg,
 
     ctx->m.last_dc[0] =
     ctx->m.last_dc[1] =
-    ctx->m.last_dc[2] = 1 << (ctx->cid_table->bit_depth + 2);
+    ctx->m.last_dc[2] = 1 << (avctx->bits_per_raw_sample + 2);
     for (mb_x = 0; mb_x < ctx->m.mb_width; mb_x++) {
         unsigned mb = mb_y * ctx->m.mb_width + mb_x;
         int qscale = ctx->mb_qscale[mb];
@@ -802,7 +836,7 @@ static int dnxhd_mb_var_thread(AVCodecContext *avctx, void *arg,
                            ((avctx->height >> ctx->interlaced) & 0xF);
 
     ctx = ctx->thread[threadnr];
-    if (ctx->cid_table->bit_depth == 8) {
+    if (avctx->bits_per_raw_sample == 8) {
         uint8_t *pix = ctx->thread[0]->src[0] + ((mb_y << 4) * ctx->m.linesize);
         for (mb_x = 0; mb_x < ctx->m.mb_width; ++mb_x, pix += 16) {
             unsigned mb = mb_y * ctx->m.mb_width + mb_x;
@@ -1192,7 +1226,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 static av_cold int dnxhd_encode_end(AVCodecContext *avctx)
 {
     DNXHDEncContext *ctx = avctx->priv_data;
-    int max_level        = 1 << (ctx->cid_table->bit_depth + 2);
+    int max_level        = 1 << (avctx->bits_per_raw_sample + 2);
     int i;
 
     av_free(ctx->vlc_codes - max_level * 2);

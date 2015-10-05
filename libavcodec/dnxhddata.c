@@ -1177,8 +1177,8 @@ void ff_dnxhd_print_profiles(AVCodecContext *avctx, int loglevel)
             if (!cid->bit_rates[j])
                 break;
 
-            av_log(avctx, loglevel, "Frame size: %dx%d%c; bitrate: %dMbps; pixel format: yuv4%sp%d; framerate: %d/%d\n",
-                   cid->width, cid->height, cid->flags & DNXHD_INTERLACED ? 'i' : 'p', cid->bit_rates[j],
+            av_log(avctx, loglevel, "CID %4d: frame size: %dx%d%c; bitrate: %dMbps; pixel format: yuv4%sp%d; framerate: %d/%d\n",
+                   cid->cid, cid->width, cid->height, cid->flags & DNXHD_INTERLACED ? 'i' : 'p', cid->bit_rates[j],
                    cid->flags & DNXHD_444 ? "44" : "22", cid->bit_depth,
                    cid->frame_rates[j].num, cid->frame_rates[j].den);
         }
