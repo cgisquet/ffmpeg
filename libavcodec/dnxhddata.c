@@ -1069,6 +1069,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       /* Anything but 50 & 59.94 seems unofficial */
       { 42, 60, 75, 85, 110 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
+    // DNxHR 444
     { 1270, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, DNXHD_444, 6, DNXHD_VARIABLE, 4,
       dnxhd_1235_luma_weight, dnxhd_1235_luma_weight,
@@ -1076,6 +1077,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1235_ac_codes, dnxhd_1235_ac_bits, dnxhd_1235_ac_info,
       dnxhd_1235_run_codes, dnxhd_1235_run_bits, dnxhd_1235_run,
       { 0 } },
+    // DNxHR HQX
     { 1271, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, 0, 6, DNXHD_VARIABLE, 4,
       dnxhd_1241_luma_weight, dnxhd_1241_chroma_weight,
@@ -1083,6 +1085,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1235_ac_codes, dnxhd_1235_ac_bits, dnxhd_1235_ac_info,
       dnxhd_1235_run_codes, dnxhd_1235_run_bits, dnxhd_1235_run,
       { 0 } },
+    // DNxHR HQ
     { 1272, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, 0, 4, 8, 4,
       dnxhd_1238_luma_weight, dnxhd_1238_chroma_weight,
@@ -1090,6 +1093,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1238_ac_codes, dnxhd_1238_ac_bits, dnxhd_1238_ac_info,
       dnxhd_1235_run_codes, dnxhd_1235_run_bits, dnxhd_1238_run,
       { 0 } },
+    // DNxHR SQ
     { 1273, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, 0, 4, 8, 3,
       dnxhd_1237_luma_weight, dnxhd_1237_chroma_weight,
@@ -1097,6 +1101,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_ac_codes, dnxhd_1237_ac_bits, dnxhd_1237_ac_info,
       dnxhd_1237_run_codes, dnxhd_1237_run_bits, dnxhd_1237_run,
       { 0 } },
+    // DNxHR LB
     { 1274, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, 0, 4, 8, 3,
       dnxhd_1237_luma_weight, dnxhd_1237_chroma_weight,
