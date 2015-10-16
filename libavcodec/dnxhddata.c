@@ -938,6 +938,7 @@ static const uint8_t dnxhd_1250_run[62] = {
     49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62,
 };
 
+/* Bitrates according to ST2019-1:2014 - some values are unofficial */
 const CIDEntry ff_dnxhd_cid_table[] = {
     { 1235, 1920, 1080, 917504, 917504,
       DNXHD_VERSION_INITIAL, 0, 6, 10, 4,
@@ -953,6 +954,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1237_ac_codes, dnxhd_1237_ac_bits, dnxhd_1237_ac_info,
       dnxhd_1237_run_codes, dnxhd_1237_run_bits, dnxhd_1237_run,
+      /* 145Mb / 29.97fps seems unofficial */
       { 115, 120, 145, 240, 290 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1238, 1920, 1080, 917504, 917504,
@@ -961,6 +963,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1238_ac_codes, dnxhd_1238_ac_bits, dnxhd_1238_ac_info,
       dnxhd_1235_run_codes, dnxhd_1235_run_bits, dnxhd_1238_run,
+      /* 220Mb / 29.97fps seems unofficial */
       { 175, 185, 220, 365, 440 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1241, 1920, 1080, 917504, 458752,
@@ -1001,6 +1004,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1251_ac_codes, dnxhd_1251_ac_bits, dnxhd_1251_ac_info,
       dnxhd_1250_run_codes, dnxhd_1250_run_bits, dnxhd_1250_run,
+      /* 110Mb / 29.97fps seems unofficial */
       { 90, 90, 110, 180, 220 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1252, 1280,  720, 303104, 303104,
@@ -1009,6 +1013,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1252_ac_codes, dnxhd_1252_ac_bits, dnxhd_1252_ac_info,
       dnxhd_1250_run_codes, dnxhd_1250_run_bits, dnxhd_1250_run,
+      /* 75Mb / 29.97fps seems unofficial */
       { 60, 60, 75, 120, 145 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1253, 1920, 1080, 188416, 188416,
@@ -1017,6 +1022,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1237_ac_codes, dnxhd_1237_ac_bits, dnxhd_1237_ac_info,
       dnxhd_1237_run_codes, dnxhd_1237_run_bits, dnxhd_1237_run,
+      /* Anything but 36Mb / 23.976 seems unofficial */
       { 36, 36, 45, 75, 90 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1256, 1920, 1080, 1835008, 1835008,
@@ -1025,6 +1031,7 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1235_dc_codes, dnxhd_1235_dc_bits,
       dnxhd_1235_ac_codes, dnxhd_1235_ac_bits, dnxhd_1235_ac_info,
       dnxhd_1235_run_codes, dnxhd_1235_run_bits, dnxhd_1235_run,
+      /* Anything but 350Mb / 23.976 seems unofficial */
       { 350, 390, 440, 730, 880 },
       { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1258, 960, 720, 212992, 212992,
@@ -1033,21 +1040,27 @@ const CIDEntry ff_dnxhd_cid_table[] = {
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1252_ac_codes, dnxhd_1252_ac_bits, dnxhd_1252_ac_info,
       dnxhd_1250_run_codes, dnxhd_1250_run_bits, dnxhd_1250_run,
-      { 42, 60, 75, 115 } },
+      /* Anything but 50 & 59.94 seems unofficial */
+      { 42, 60, 75, 85, 110 },
+      { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1259, 1440, 1080, 417792, 417792,
       DNXHD_VERSION_444, 0, 4, 8, 3,
       dnxhd_1237_luma_weight, dnxhd_1237_chroma_weight,
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1237_ac_codes, dnxhd_1237_ac_bits, dnxhd_1237_ac_info,
       dnxhd_1237_run_codes, dnxhd_1237_run_bits, dnxhd_1237_run,
-      { 63, 84, 100, 110 } },
+      /* 50 & 59.94 seem unofficial */
+      { 80, 85, 100, 110 },
+      { { 24000, 1001 }, { 25, 1 }, { 50, 1 }, { 60000, 1001 } } },
     { 1260, 1440, 1080, 835584, 417792,
       DNXHD_VERSION_444, DNXHD_INTERLACED | DNXHD_MBAFF, 4, 8, 3,
       dnxhd_1260_luma_weight, dnxhd_1260_chroma_weight,
       dnxhd_1237_dc_codes, dnxhd_1237_dc_bits,
       dnxhd_1237_ac_codes, dnxhd_1237_ac_bits, dnxhd_1237_ac_info,
       dnxhd_1237_run_codes, dnxhd_1237_run_bits, dnxhd_1237_run,
-      { 80, 90, 100, 110 } },
+      /* Anything but 50 & 59.94 seems unofficial */
+      { 42, 60, 75, 85, 110 },
+      { { 24000, 1001 }, { 25, 1 }, { 30000, 1001 }, { 50, 1 }, { 60000, 1001 } } },
     { 1270, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE, DNXHD_VARIABLE,
       DNXHD_VERSION_HR2, DNXHD_444, 6, DNXHD_VARIABLE, 4,
       dnxhd_1235_luma_weight, dnxhd_1235_luma_weight,
