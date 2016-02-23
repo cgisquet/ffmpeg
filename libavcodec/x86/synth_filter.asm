@@ -44,28 +44,29 @@ SECTION .text
 %endif
 %endmacro
 
-%macro INNER_LOOP   1
+; %1=offset   %2=step
+%macro INNER_LOOP   2
     ; reading backwards:  ptr1 = synth_buf + j + i; ptr2 = synth_buf + j - i
-    ;~ a += window[i + j]      * (-synth_buf[15 - i + j])
-    ;~ b += window[i + j + 16] * (synth_buf[i + j])
-    SHUF          m5,  ptr2 + j + (15 - 3) * 4, m6
+    ;~ a += window[i + j]      * (-synth_buf[%2-1 - i + j])
+    ;~ b += window[i + j + %2] * (synth_buf[i + j])
+    SHUF          m5,  ptr2 + j + (%2-1 - 3) * 4, m6
     mova          m6, [ptr1 + j]
 %if ARCH_X86_64
-    SHUF         m11,  ptr2 + j + (15 - 3) * 4 - mmsize, m12
+    SHUF         m11,  ptr2 + j + (%2-1 - 3) * 4 - mmsize, m12
     mova         m12, [ptr1 + j + mmsize]
 %endif
 %if cpuflag(fma3)
-    fmaddps       m2, m6,  [win + %1 + j + 16 * 4], m2
+    fmaddps       m2, m6,  [win + %1 + j + %2 * 4], m2
     fnmaddps      m1, m5,  [win + %1 + j], m1
 %if ARCH_X86_64
-    fmaddps       m8, m12, [win + %1 + j + mmsize + 16 * 4], m8
+    fmaddps       m8, m12, [win + %1 + j + mmsize + %2 * 4], m8
     fnmaddps      m7, m11, [win + %1 + j + mmsize], m7
 %endif
 %else ; non-FMA
-    mulps         m6, m6,  [win + %1 + j + 16 * 4]
+    mulps         m6, m6,  [win + %1 + j + %2 * 4]
     mulps         m5, m5,  [win + %1 + j]
 %if ARCH_X86_64
-    mulps        m12, m12, [win + %1 + j + mmsize + 16 * 4]
+    mulps        m12, m12, [win + %1 + j + mmsize + %2 * 4]
     mulps        m11, m11, [win + %1 + j + mmsize]
 %endif
     addps         m2, m2, m6
@@ -75,27 +76,27 @@ SECTION .text
     subps         m7, m7, m11
 %endif
 %endif ; cpuflag(fma3)
-    ;~ c += window[i + j + 32] * (synth_buf[16 + i + j])
-    ;~ d += window[i + j + 48] * (synth_buf[31 - i + j])
-    SHUF          m6,  ptr2 + j + (31 - 3) * 4, m5
-    mova          m5, [ptr1 + j + 16 * 4]
+    ;~ c += window[i + j + 2*%2] * (synth_buf[%2 + i + j])
+    ;~ d += window[i + j + 3*%2] * (synth_buf[2*%2-1 - i + j])
+    SHUF          m6,  ptr2 + j + (2*%2-1 - 3) * 4, m5
+    mova          m5, [ptr1 + j + %2 * 4]
 %if ARCH_X86_64
-    SHUF         m12,  ptr2 + j + (31 - 3) * 4 - mmsize, m11
-    mova         m11, [ptr1 + j + mmsize + 16 * 4]
+    SHUF         m12,  ptr2 + j + (2*%2-1 - 3) * 4 - mmsize, m11
+    mova         m11, [ptr1 + j + mmsize + %2 * 4]
 %endif
 %if cpuflag(fma3)
-    fmaddps       m3, m5,  [win + %1 + j + 32 * 4], m3
-    fmaddps       m4, m6,  [win + %1 + j + 48 * 4], m4
+    fmaddps       m3, m5,  [win + %1 + j + 2*%2 * 4], m3
+    fmaddps       m4, m6,  [win + %1 + j + 3*%2 * 4], m4
 %if ARCH_X86_64
-    fmaddps       m9, m11, [win + %1 + j + mmsize + 32 * 4], m9
-    fmaddps      m10, m12, [win + %1 + j + mmsize + 48 * 4], m10
+    fmaddps       m9, m11, [win + %1 + j + mmsize + 2*%2 * 4], m9
+    fmaddps      m10, m12, [win + %1 + j + mmsize + 3*%2 * 4], m10
 %endif
 %else ; non-FMA
-    mulps         m5, m5,  [win + %1 + j + 32 * 4]
-    mulps         m6, m6,  [win + %1 + j + 48 * 4]
+    mulps         m5, m5,  [win + %1 + j + 2*%2 * 4]
+    mulps         m6, m6,  [win + %1 + j + 3*%2 * 4]
 %if ARCH_X86_64
-    mulps        m11, m11, [win + %1 + j + mmsize + 32 * 4]
-    mulps        m12, m12, [win + %1 + j + mmsize + 48 * 4]
+    mulps        m11, m11, [win + %1 + j + mmsize + 2*%2 * 4]
+    mulps        m12, m12, [win + %1 + j + mmsize + 3*%2 * 4]
 %endif
     addps         m3, m3, m5
     addps         m4, m4, m6
@@ -104,14 +105,15 @@ SECTION .text
     addps        m10, m10, m12
 %endif
 %endif ; cpuflag(fma3)
-    sub            j, 64 * 4
+    sub            j, 4*%2 * 4
 %endmacro
 
 ; void ff_synth_filter_inner_<opt>(float *synth_buf, float synth_buf2[32],
 ;                                  const float window[512], float out[32],
 ;                                  intptr_t offset, float scale)
-%macro SYNTH_FILTER 0
-cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
+; %1=16/32 (related to step)
+%macro SYNTH_FILTER 1
+cglobal synth_filter_inner%1, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
                               synth_buf, synth_buf2, window, out, off, scale
 %define scale m0
 %if ARCH_X86_32 || WIN64
@@ -131,14 +133,14 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
 %define OFFQ  offq
 %endif
     ; prepare inner counter limit 1
-    mov          r5q, 480
+    mov          r5q, 32*%1-32
     sub          r5q, offmp
-    and          r5q, -64
+    and          r5q, -4*%1
     shl          r5q, 2
-%if ARCH_X86_32 || notcpuflag(avx)
+%if ARCH_X86_32 || %1 * 4 > (ARCH_X86_64 + 1) * mmsize
     mov         OFFQ, r5q
 %define i        r5q
-    mov            i, 16 * 4 - (ARCH_X86_64 + 1) * mmsize  ; main loop counter
+    mov            i, %1 * 4 - (ARCH_X86_64 + 1) * mmsize  ; main loop counter
 %else
 %define i 0
 %define OFFQ  r5q
@@ -153,7 +155,7 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
     SETZERO       m3
     SETZERO       m4
     mova          m1, [buf2 + i]
-    mova          m2, [buf2 + i + 16 * 4]
+    mova          m2, [buf2 + i + %1 * 4]
 %if ARCH_X86_32
 %define ptr1     r0q
 %define ptr2     r1q
@@ -161,7 +163,7 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
 %define j        r3q
     mov          win, windowm
     mov         ptr1, synth_bufm
-%if ARCH_X86_32 || notcpuflag(avx)
+%if ARCH_X86_32 || %1 * 4 > (ARCH_X86_64 + 1) * mmsize
     add          win, i
     add         ptr1, i
 %endif
@@ -173,29 +175,29 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
     SETZERO       m9
     SETZERO      m10
     mova          m7, [buf2 + i + mmsize]
-    mova          m8, [buf2 + i + mmsize + 16 * 4]
+    mova          m8, [buf2 + i + mmsize + %1 * 4]
     lea          win, [windowq + i]
     lea         ptr1, [synth_bufq + i]
 %endif
     mov         ptr2, synth_bufmp
     ; prepare the inner loop counter
     mov            j, OFFQ
-%if ARCH_X86_32 || notcpuflag(avx)
+%if ARCH_X86_32 || %1 * 4 > (ARCH_X86_64 + 1) * mmsize
     sub         ptr2, i
 %endif
 .loop1:
-    INNER_LOOP  0
+    INNER_LOOP  0, %1
     jge       .loop1
 
-    mov            j, 448 * 4
+    mov            j, 28*%1 * 4
     sub            j, OFFQ
     jz          .end
     sub         ptr1, j
     sub         ptr2, j
-    add          win, OFFQ ; now at j-64, so define OFFSET
-    sub            j, 64 * 4
+    add          win, OFFQ ; now at j-4*%1, so define OFFSET
+    sub            j, 4*%1 * 4
 .loop2:
-    INNER_LOOP  64 * 4
+    INNER_LOOP  4*%1 * 4, %1
     jge       .loop2
 
 .end:
@@ -214,20 +216,20 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
     ;~ synth_buf2[i]      = c;
     ;~ synth_buf2[i + 16] = d;
     mova   [buf2 + i +  0 * 4], m3
-    mova   [buf2 + i + 16 * 4], m4
+    mova   [buf2 + i + %1 * 4], m4
 %if ARCH_X86_64
     mova   [buf2 + i +  0 * 4 + mmsize], m9
-    mova   [buf2 + i + 16 * 4 + mmsize], m10
+    mova   [buf2 + i + %1 * 4 + mmsize], m10
 %endif
     ;~ out[i]      = a;
     ;~ out[i + 16] = a;
     mova   [outq + i +  0 * 4], m1
-    mova   [outq + i + 16 * 4], m2
+    mova   [outq + i + %1 * 4], m2
 %if ARCH_X86_64
     mova   [outq + i +  0 * 4 + mmsize], m7
-    mova   [outq + i + 16 * 4 + mmsize], m8
+    mova   [outq + i + %1 * 4 + mmsize], m8
 %endif
-%if ARCH_X86_32 || notcpuflag(avx)
+%if ARCH_X86_32 || %1 * 4 > (ARCH_X86_64 + 1) * mmsize
     sub            i, (ARCH_X86_64 + 1) * mmsize
     jge    .mainloop
 %endif
@@ -236,11 +238,15 @@ cglobal synth_filter_inner, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
 
 %if ARCH_X86_32
 INIT_XMM sse
-SYNTH_FILTER
+SYNTH_FILTER 16
+SYNTH_FILTER 32
 %endif
 INIT_XMM sse2
-SYNTH_FILTER
+SYNTH_FILTER 16
+SYNTH_FILTER 32
 INIT_YMM avx
-SYNTH_FILTER
+SYNTH_FILTER 16
+SYNTH_FILTER 32
 INIT_YMM fma3
-SYNTH_FILTER
+SYNTH_FILTER 16
+SYNTH_FILTER 32

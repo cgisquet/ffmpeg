@@ -24,7 +24,25 @@
 #include "libavcodec/synth_filter.h"
 
 #define SYNTH_FILTER_FUNC(opt)                                                 \
-void ff_synth_filter_inner_##opt(float *synth_buf_ptr, float synth_buf2[32],   \
+void ff_synth_filter_inner32_##opt(float *synth_buf_ptr, float synth_buf2[64], \
+                                   const float window[1024],                   \
+                                   float out[64], intptr_t offset, float scale); \
+static void synth_filter64_##opt(FFTContext *imdct,                            \
+                                 float *synth_buf_ptr, int *synth_buf_offset,  \
+                                 float synth_buf2[64], const float window[1024], \
+                                 float out[64], const float in[64], float scale) \
+{                                                                              \
+    float *synth_buf= synth_buf_ptr + *synth_buf_offset;                       \
+                                                                               \
+    imdct->imdct_half(imdct, synth_buf, in);                                   \
+                                                                               \
+    ff_synth_filter_inner32_##opt(synth_buf, synth_buf2, window,               \
+                                  out, *synth_buf_offset, scale);              \
+                                                                               \
+    *synth_buf_offset = (*synth_buf_offset - 64) & 1023;                       \
+}                                                                              \
+                                                                               \
+void ff_synth_filter_inner16_##opt(float *synth_buf_ptr, float synth_buf2[32], \
                                  const float window[512],                      \
                                  float out[32], intptr_t offset, float scale); \
 static void synth_filter_##opt(FFTContext *imdct,                              \
@@ -36,7 +54,7 @@ static void synth_filter_##opt(FFTContext *imdct,                              \
                                                                                \
     imdct->imdct_half(imdct, synth_buf, in);                                   \
                                                                                \
-    ff_synth_filter_inner_##opt(synth_buf, synth_buf2, window,                 \
+    ff_synth_filter_inner16_##opt(synth_buf, synth_buf2, window,               \
                                 out, *synth_buf_offset, scale);                \
                                                                                \
     *synth_buf_offset = (*synth_buf_offset - 32) & 511;                        \
@@ -59,16 +77,20 @@ av_cold void ff_synth_filter_init_x86(SynthFilterContext *s)
 #if ARCH_X86_32
     if (EXTERNAL_SSE(cpu_flags)) {
         s->synth_filter_float = synth_filter_sse;
+        s->synth_filter_float_64 = synth_filter64_sse;
     }
 #endif
     if (EXTERNAL_SSE2(cpu_flags)) {
         s->synth_filter_float = synth_filter_sse2;
+        s->synth_filter_float_64 = synth_filter64_sse2;
     }
     if (EXTERNAL_AVX_FAST(cpu_flags)) {
         s->synth_filter_float = synth_filter_avx;
+        s->synth_filter_float_64 = synth_filter64_avx;
     }
     if (EXTERNAL_FMA3_FAST(cpu_flags)) {
         s->synth_filter_float = synth_filter_fma3;
+        s->synth_filter_float_64 = synth_filter64_fma3;
     }
 #endif /* HAVE_YASM */
 }
