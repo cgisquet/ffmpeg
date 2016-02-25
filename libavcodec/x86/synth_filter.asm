@@ -21,6 +21,15 @@
 
 %include "libavutil/x86/x86util.asm"
 
+SECTION_RODATA
+
+fp_1_16: times 2 dq 1<<21
+fp_norm16: times 2 dq 1<<(21-1)
+fp_1_32: times 2 dq 1<<20
+fp_norm32: times 2 dq 1<<(20-1)
+fp_min23: times 4 dd -1<<23
+fp_max23: times 4 dd (1<<23)-1
+
 SECTION .text
 
 %macro SETZERO 1
@@ -236,6 +245,7 @@ cglobal synth_filter_inner%1, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
     RET
 %endmacro
 
+
 %if ARCH_X86_32
 INIT_XMM sse
 SYNTH_FILTER 16
@@ -250,3 +260,148 @@ SYNTH_FILTER 32
 INIT_YMM fma3
 SYNTH_FILTER 16
 SYNTH_FILTER 32
+
+
+; %1/%2=dst1 %3/%4=input1  %5/%6=dst2  %7/%8=input2
+%macro LOAD4_MUL  8
+    movh          %1, [%3]
+    movh          %2, [%4]
+    movh          %5, [%7]
+    movh          %6, [%8]
+    ; hi dw of the qw is not important
+    ; XXX: isn't one of those inverted?
+    punpckldq     %1, %1
+    pshufd        %2, %2, q0011
+    punpckldq     %5, %5
+    punpckldq     %6, %6
+    pmuldq        %1, %5
+    pmuldq        %2, %6
+%endmacro
+
+; %1=offset   %2=step
+%macro FP_INNER_LOOP   2
+    ; reading backwards:  ptr1 = synth_buf + i; ptr2 = synth_buf - i
+    ; a += (int64_t)window[i + j     ] * synth_buf[       i + j];
+    ; b += (int64_t)window[i + j + %2] * synth_buf[%2-1 - i + j];
+    LOAD4_MUL     m5, m6, ptr1 + j, ptr2 + j + (%2-1 - 3) * 4, m0, m7, win + %1 + j, win + %1 + j + %2 * 4
+    paddq         m1, m5
+    paddq         m2, m6
+    ; c += (int64_t)window[i + j + 2*%2] * synth_buf[%2     + i + j];
+    ; d += (int64_t)window[i + j + 3*%2] * synth_buf[2*%2-1 - i + j];
+    LOAD4_MUL     m5, m6, ptr1 + j + %2 * 4, ptr2 + j + (2*%2-1 - 3) * 4, m0, m7, win + %1 + j + 2*%2 * 4, win + %1 + j + 3*%2 * 4
+    paddq         m3, m5
+    paddq         m4, m6
+    sub            j, 2*%2 * 4
+%endmacro
+
+; void fp_synth_filter_inner_<opt>(int32_t *synth_buf_ptr, int *synth_buf_offset,
+;                                  int32_t synth_buf2[32], const int32_t window[512],
+;                                  int32_t out[32],  intptr_t offset)
+; %1=16/32 (related to step)
+%macro FP_SYNTH_FILTER 1
+cglobal fp_synth_filter_inner%1, 0, 6 + 4 * ARCH_X86_64, 7 + 6 * ARCH_X86_64, \
+                              synth_buf, synth_buf2, window, out, off
+%if ARCH_X86_32 || WIN64
+; Make sure offset is in a register and not on the stack
+%define OFFQ  r4q
+%else
+%define OFFQ  offq
+%endif
+    ; prepare inner counter limit 1
+    mov          r5q, 32*%1 - 32
+    sub          r5q, offmp
+    and          r5q, -4*%1
+    shl          r5q, 2
+    mov         OFFQ, r5q
+%define i        r5q
+    mov            i, %1 * 4 - (mmsize/2) ; main loop counter - only mmsiz
+
+%define buf2     synth_buf2q
+%if ARCH_X86_32
+    mov         buf2, synth_buf2mp
+%endif
+.mainloop:
+    ; m1 = a  m2 = b  m3 = c  m4 = d
+    SETZERO       m3
+    SETZERO       m4
+    movh          m1, [buf2 + i]
+    movh          m2, [buf2 + i + %1 * 4]
+    ; hi dw of the qw is not important
+    punpckldq     m1, m1
+    punpckldq     m2, m2
+    pmuldq        m1, [fp_1_ %+ %1]
+    pmuldq        m2, [fp_1_ %+ %1]
+%if ARCH_X86_32
+%define ptr1     r0q
+%define ptr2     r1q
+%define win      r2q
+%define j        r3q
+    mov          win, windowm
+    mov         ptr1, synth_bufm
+    add          win, i
+    add         ptr1, i
+%else ; ARCH_X86_64
+%define ptr1     r6q
+%define ptr2     r7q ; must be loaded
+%define win      r8q
+%define j        r9q
+    lea          win, [windowq + i]
+    lea         ptr1, [synth_bufq + i]
+%endif
+    mov         ptr2, synth_bufmp
+    ; prepare the inner loop counter
+    mov            j, OFFQ
+    sub         ptr2, i
+.loop1:
+    FP_INNER_LOOP  0, %1
+    jge       .loop1
+
+    mov            j, 28*%1 * 4
+    sub            j, OFFQ
+    jz          .end
+    sub         ptr1, j
+    sub         ptr2, j
+    add          win, OFFQ ; now at j-4*%1, so define OFFSET
+    sub            j, 4*%1 * 4
+.loop2:
+    FP_INNER_LOOP  4*%1 * 4, %1
+    jge       .loop2
+
+.end:
+%if ARCH_X86_32
+    mov         buf2, synth_buf2m ; needed for next iteration anyway
+    mov         outq, outmp       ; j, which will be set again during it
+%endif
+%if %1 == 16
+%define SHIFT  21
+%else
+%define SHIFT  20
+%endif
+    ;~ out[i]      = clip23(norm2x(a));
+    ;~ out[i + %1] = clip23(norm2x(b));
+    paddq         m1, [fp_norm %+ %1]
+    paddq         m2, [fp_norm %+ %1]
+    psrlq         m1, SHIFT
+    psrlq         m2, SHIFT
+    shufps        m1, m2, q2020
+    pminsd        m1, [fp_min23]
+    pmaxsd        m1, [fp_max23]
+    movlps   [outq + i +  0 * 4], m1
+    movhps   [outq + i + %1 * 4], m1
+    ;~ synth_buf2[i]      = c;
+    ;~ synth_buf2[i + %1] = d;
+    paddq         m3, [fp_norm %+ %1]
+    paddq         m4, [fp_norm %+ %1]
+    psrlq         m3, SHIFT
+    psrlq         m4, SHIFT
+    shufps        m3, m4, q2020
+    movlps   [buf2 + i +  0 * 4], m3
+    movhps   [buf2 + i + %1 * 4], m3
+    sub            i, mmsize/2
+    jge    .mainloop
+    RET
+%endmacro
+
+INIT_XMM sse4
+FP_SYNTH_FILTER 16
+FP_SYNTH_FILTER 32

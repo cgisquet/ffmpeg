@@ -23,6 +23,43 @@
 #include "libavutil/x86/cpu.h"
 #include "libavcodec/synth_filter.h"
 
+#define FP_SYNTH_FILTER_FUNC(opt)                                                 \
+void ff_fp_synth_filter_inner32_##opt(int32_t *synth_buf_ptr, int32_t synth_buf2[64], \
+                                   const int32_t window[1024],                 \
+                                   int32_t out[64], intptr_t offset);          \
+static void fp_synth_filter64_##opt(DCADCTContext *imdct,                      \
+                                    int32_t *synth_buf_ptr, int *synth_buf_offset, \
+                                    int32_t synth_buf2[64], const int32_t window[1024], \
+                                    int32_t out[64], const int32_t in[64])     \
+{                                                                              \
+    int32_t *synth_buf= synth_buf_ptr + *synth_buf_offset;                     \
+                                                                               \
+    imdct->imdct_half[1](synth_buf, in);                                       \
+                                                                               \
+    ff_fp_synth_filter_inner32_##opt(synth_buf, synth_buf2, window,            \
+                                     out, *synth_buf_offset);                  \
+                                                                               \
+    *synth_buf_offset = (*synth_buf_offset - 64) & 1023;                       \
+}                                                                              \
+                                                                               \
+void ff_fp_synth_filter_inner16_##opt(int32_t *synth_buf_ptr, int32_t synth_buf2[32], \
+                                      const int32_t window[512],               \
+                                      int32_t out[32], intptr_t offset);       \
+static void fp_synth_filter_##opt(DCADCTContext *imdct,                        \
+                                  int32_t *synth_buf_ptr, int *synth_buf_offset, \
+                                  int32_t synth_buf2[64], const int32_t window[1024], \
+                                  int32_t out[64], const int32_t in[64])       \
+{                                                                              \
+    int32_t *synth_buf= synth_buf_ptr + *synth_buf_offset;                     \
+                                                                               \
+    imdct->imdct_half[0](synth_buf, in);                                       \
+                                                                               \
+    ff_fp_synth_filter_inner16_##opt(synth_buf, synth_buf2, window,            \
+                                     out, *synth_buf_offset);                  \
+                                                                               \
+    *synth_buf_offset = (*synth_buf_offset - 32) & 511;                        \
+}
+
 #define SYNTH_FILTER_FUNC(opt)                                                 \
 void ff_synth_filter_inner32_##opt(float *synth_buf_ptr, float synth_buf2[64], \
                                    const float window[1024],                   \
@@ -67,6 +104,8 @@ SYNTH_FILTER_FUNC(sse)
 SYNTH_FILTER_FUNC(sse2)
 SYNTH_FILTER_FUNC(avx)
 SYNTH_FILTER_FUNC(fma3)
+
+FP_SYNTH_FILTER_FUNC(sse4)
 #endif /* HAVE_YASM */
 
 av_cold void ff_synth_filter_init_x86(SynthFilterContext *s)
@@ -83,6 +122,10 @@ av_cold void ff_synth_filter_init_x86(SynthFilterContext *s)
     if (EXTERNAL_SSE2(cpu_flags)) {
         s->synth_filter_float = synth_filter_sse2;
         s->synth_filter_float_64 = synth_filter64_sse2;
+    }
+    if (EXTERNAL_SSE4(cpu_flags)) {
+        s->synth_filter_fixed    = fp_synth_filter_sse4;
+        s->synth_filter_fixed_64 = fp_synth_filter64_sse4;
     }
     if (EXTERNAL_AVX_FAST(cpu_flags)) {
         s->synth_filter_float = synth_filter_avx;

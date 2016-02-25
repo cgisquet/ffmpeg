@@ -112,13 +112,17 @@ static void synth_filter_fixed(DCADCTContext *imdct,
         int64_t c = 0;
         int64_t d = 0;
         for (j = 0; j < 512 - *synth_buf_offset; j += 64) {
+            //a += window[i + j     ] * (-synth_buf[15 - i + j      ]);
             a += (int64_t)window[i + j     ] * synth_buf[     i + j      ];
+            //b += window[i + j + 16] * ( synth_buf[     i + j      ]);
             b += (int64_t)window[i + j + 16] * synth_buf[15 - i + j      ];
             c += (int64_t)window[i + j + 32] * synth_buf[16 + i + j      ];
             d += (int64_t)window[i + j + 48] * synth_buf[31 - i + j      ];
         }
         for (     ; j < 512; j += 64) {
+            //a += window[i + j     ] * (-synth_buf[15 - i + j - 512]);
             a += (int64_t)window[i + j     ] * synth_buf[     i + j - 512];
+            //b += window[i + j + 16] * ( synth_buf[     i + j - 512]);
             b += (int64_t)window[i + j + 16] * synth_buf[15 - i + j - 512];
             c += (int64_t)window[i + j + 32] * synth_buf[16 + i + j - 512];
             d += (int64_t)window[i + j + 48] * synth_buf[31 - i + j - 512];
@@ -148,13 +152,17 @@ static void synth_filter_fixed_64(DCADCTContext *imdct,
         int64_t c = 0;
         int64_t d = 0;
         for (j = 0; j < 1024 - *synth_buf_offset; j += 128) {
+            //a += window[i + j     ] * (-synth_buf[31 - i + j       ]);
             a += (int64_t)window[i + j     ] * synth_buf[     i + j       ];
+            //b += window[i + j + 32] * ( synth_buf[     i + j       ]);
             b += (int64_t)window[i + j + 32] * synth_buf[31 - i + j       ];
             c += (int64_t)window[i + j + 64] * synth_buf[32 + i + j       ];
             d += (int64_t)window[i + j + 96] * synth_buf[63 - i + j       ];
         }
         for (     ; j < 1024; j += 128) {
+            //a += window[i + j     ] * (-synth_buf[31 - i + j - 1024]);
             a += (int64_t)window[i + j     ] * synth_buf[     i + j - 1024];
+            //b += window[i + j + 32] * ( synth_buf[     i + j - 1024]);
             b += (int64_t)window[i + j + 32] * synth_buf[31 - i + j - 1024];
             c += (int64_t)window[i + j + 64] * synth_buf[32 + i + j - 1024];
             d += (int64_t)window[i + j + 96] * synth_buf[63 - i + j - 1024];
