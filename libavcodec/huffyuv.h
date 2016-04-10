@@ -32,8 +32,8 @@
 #include <stdint.h>
 
 #include "avcodec.h"
+#include "bitstream.h"
 #include "bswapdsp.h"
-#include "get_bits.h"
 #include "huffyuvdsp.h"
 #include "huffyuvencdsp.h"
 #include "put_bits.h"
@@ -56,7 +56,7 @@ typedef struct HYuvContext {
     AVClass *class;
     AVCodecContext *avctx;
     Predictor predictor;
-    GetBitContext gb;
+    BitstreamContext bc;
     PutBitContext pb;
     int interlaced;
     int decorrelate;

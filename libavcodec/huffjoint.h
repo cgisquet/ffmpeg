@@ -24,51 +24,48 @@
 #ifndef AVCODEC_HUFF_JOINT_H
 #define AVCODEC_HUFF_JOINT_H
 
-#include "get_bits.h"
+#include "bitstream.h"
 
 /** Subset of GET_VLC for use in hand-roller VLC code */
-#define VLC_INTERN(dst, table, gb, name, bits, max_depth)   \
+#define VLC_INTERN(dst, table, bc, bits, max_depth)         \
     code = table[index][0];                                 \
     n    = table[index][1];                                 \
     if (max_depth > 1 && n < 0) {                           \
-        LAST_SKIP_BITS(name, gb, bits);                     \
-        UPDATE_CACHE(name, gb);                             \
+        bitstream_skip(bc, bits);                           \
                                                             \
         nb_bits = -n;                                       \
-        index   = SHOW_UBITS(name, gb, nb_bits) + code;     \
+        index   = bitstream_peek(bc, nb_bits) + code;    \
         code    = table[index][0];                          \
         n       = table[index][1];                          \
         if (max_depth > 2 && n < 0) {                       \
-            LAST_SKIP_BITS(name, gb, nb_bits);              \
-            UPDATE_CACHE(name, gb);                         \
+            bitstream_skip(bc, nb_bits);                    \
                                                             \
             nb_bits = -n;                                   \
-            index   = SHOW_UBITS(name, gb, nb_bits) + code; \
+            index   = bitstream_peek(bc, nb_bits) + code;\
             code    = table[index][0];                      \
             n       = table[index][1];                      \
         }                                                   \
     }                                                       \
     dst = code;                                             \
-    LAST_SKIP_BITS(name, gb, n)
+    bitstream_skip(bc, n)
 
 /**
  * Try to read into dst0 and dst1, using operation OP, 2 symbols
  * by using joint VLC dtable, otherwise read them using table1 and
  * table2 respectively.
  */
-#define GET_VLC_DUAL_INTERNAL(dst0, dst1, name, gb, dtable,         \
+#define GET_VLC_DUAL_INTERNAL(dst0, dst1, bc, dtable,               \
                               table1, table2, bits, max_depth, OP)  \
     if (n<=0) {                                                     \
         int nb_bits;                                                \
-        VLC_INTERN(dst0, table1, gb, name, bits, max_depth);        \
+        VLC_INTERN(dst0, table1, bc, bits, max_depth);              \
                                                                     \
-        UPDATE_CACHE(re, gb);                                       \
-        index = SHOW_UBITS(name, gb, bits);                         \
-        VLC_INTERN(dst1, table2, gb, name, bits, max_depth);        \
+        index = bitstream_peek(bc, bits);                        \
+        VLC_INTERN(dst1, table2, bc, bits, max_depth);              \
     } else {                                                        \
         code = dtable[index][0];                                    \
         OP(dst0, dst1, code);                                       \
-        LAST_SKIP_BITS(name, gb, n);                                \
+        bitstream_skip(bc, n);                                      \
     }
 
 /**
@@ -76,13 +73,13 @@
  * by using joint VLC dtable, otherwise read them using table1 and
  * table2 respectively.
  */
-#define GET_VLC_DUAL(dst0, dst1, name, gb, dtable, table1, table2,  \
+#define GET_VLC_DUAL(dst0, dst1, bc, dtable, table1, table2,        \
                      bits, max_depth, OP)                           \
     do {                                                            \
-        unsigned int index = SHOW_UBITS(name, gb, bits);            \
+        unsigned int index = bitstream_peek(bc, bits);           \
         int          code, n = dtable[index][1];                    \
                                                                     \
-        GET_VLC_DUAL_INTERNAL(dst0, dst1, name, gb, dtable,         \
+        GET_VLC_DUAL_INTERNAL(dst0, dst1, bc, dtable,               \
                               table1, table2, bits, max_depth, OP)  \
     } while (0)
 
@@ -93,26 +90,25 @@
  * @param Ftable  4-element-wide table
  * @param Dtable  2-element-wide table
  */
-#define GET_VLC_MULTI(dst, off, name, gb, Ftable, Dtable, table, bits, max_depth) \
+#define GET_VLC_MULTI(dst, off, bc, Ftable, Dtable, table, bits, max_depth) \
     do {                                                                 \
-        unsigned int index = SHOW_UBITS(name, gb, bits);                 \
+        unsigned int index = bitstream_peek(bc, bits);                \
         int          code, n = Ftable[index][1];                         \
                                                                          \
         if (n<=0) {                                                      \
             n = Dtable[index][1];                                        \
-            GET_VLC_DUAL_INTERNAL(dst[off+0], dst[off+1], name, gb, Dtable,\
+            GET_VLC_DUAL_INTERNAL(dst[off+0], dst[off+1], bc, Dtable,    \
                                   table, table, bits, max_depth, OP8bits)\
             /* And now for the last 2 */                                 \
-            UPDATE_CACHE(name, gb);                                      \
-            index = SHOW_UBITS(name, gb, bits);                          \
+            index = bitstream_peek(bc, bits);                         \
             n = Dtable[index][1];                                        \
-            GET_VLC_DUAL_INTERNAL(dst[off+2], dst[off+3], name, gb, Dtable,\
+            GET_VLC_DUAL_INTERNAL(dst[off+2], dst[off+3], bc, Dtable,    \
                                   table, table, bits, max_depth, OP8bits)\
         } else {                                                         \
             code = Ftable[index][0];                                     \
             dst[off+0] =  code>>12;    dst[off+1] = (code>>8)&7;         \
             dst[off+2] = (code>> 4)&7; dst[off+3] = code&7;              \
-            LAST_SKIP_BITS(name, gb, n);                                 \
+            bitstream_skip(bc, n);                                       \
         }                                                                \
     } while (0)
 
