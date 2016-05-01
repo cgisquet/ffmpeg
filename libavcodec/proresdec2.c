@@ -26,11 +26,9 @@
 
 //#define DEBUG
 
-#define LONG_BITSTREAM_READER
-
 #include "libavutil/internal.h"
 #include "avcodec.h"
-#include "get_bits.h"
+#include "bitstream.h"
 #include "idctdsp.h"
 #include "internal.h"
 #include "simple_idct.h"
@@ -255,8 +253,7 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
         unsigned int rice_order, exp_order, switch_bits;                \
         unsigned int q, buf, bits;                                      \
                                                                         \
-        UPDATE_CACHE(re, gb);                                           \
-        buf = GET_CACHE(re, gb);                                        \
+        buf = bitstream_peek(gb, 32);                                \
                                                                         \
         /* number of bits to switch between rice and exp golomb */      \
         switch_bits =  codebook & 3;                                    \
@@ -267,16 +264,14 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
                                                                         \
         if (q > switch_bits) { /* exp golomb */                         \
             bits = exp_order - switch_bits + (q<<1);                    \
-            val = SHOW_UBITS(re, gb, bits) - (1 << exp_order) +         \
+            val = bitstream_read(gb, bits) - (1 << exp_order) +      \
                 ((switch_bits + 1) << rice_order);                      \
-            SKIP_BITS(re, gb, bits);                                    \
         } else if (rice_order) {                                        \
-            SKIP_BITS(re, gb, q+1);                                     \
-            val = (q << rice_order) + SHOW_UBITS(re, gb, rice_order);   \
-            SKIP_BITS(re, gb, rice_order);                              \
+            bitstream_skip(gb, q+1);                                    \
+            val = (q << rice_order) + bitstream_read(gb, rice_order);\
         } else {                                                        \
             val = q;                                                    \
-            SKIP_BITS(re, gb, q+1);                                     \
+            bitstream_skip(gb, q+1);                                    \
         }                                                               \
     } while (0)
 
@@ -286,13 +281,11 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
 
 static const uint8_t dc_codebook[7] = { 0x04, 0x28, 0x28, 0x4D, 0x4D, 0x70, 0x70};
 
-static av_always_inline void decode_dc_coeffs(GetBitContext *gb, int16_t *out,
+static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out,
                                               int blocks_per_slice)
 {
     int16_t prev_dc;
     int code, i, sign;
-
-    OPEN_READER(re, gb);
 
     DECODE_CODEWORD(code, FIRST_DC_CB);
     prev_dc = TOSIGNED(code);
@@ -309,14 +302,13 @@ static av_always_inline void decode_dc_coeffs(GetBitContext *gb, int16_t *out,
         prev_dc += (((code + 1) >> 1) ^ sign) - sign;
         out[0] = prev_dc;
     }
-    CLOSE_READER(re, gb);
 }
 
 // adaptive codebook switching lut according to previous run/level values
 static const uint8_t run_to_cb[16] = { 0x06, 0x06, 0x05, 0x05, 0x04, 0x29, 0x29, 0x29, 0x29, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x4C };
 static const uint8_t lev_to_cb[10] = { 0x04, 0x0A, 0x05, 0x06, 0x04, 0x28, 0x28, 0x28, 0x28, 0x4C };
 
-static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContext *gb,
+static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamContext *gb,
                                              int16_t *out, int blocks_per_slice)
 {
     ProresContext *ctx = avctx->priv_data;
@@ -325,8 +317,6 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
     int max_coeffs, i, bits_left;
     int log2_block_count = av_log2(blocks_per_slice);
 
-    OPEN_READER(re, gb);
-    UPDATE_CACHE(re, gb);                                           \
     run   = 4;
     level = 2;
 
@@ -334,8 +324,8 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
     block_mask = blocks_per_slice - 1;
 
     for (pos = block_mask;;) {
-        bits_left = gb->size_in_bits - re_index;
-        if (!bits_left || (bits_left < 32 && !SHOW_UBITS(re, gb, bits_left)))
+        bits_left = bitstream_bits_left(gb);
+        if (!bits_left || (bits_left < 32 && !bitstream_peek(gb, bits_left)))
             break;
 
         DECODE_CODEWORD(run, run_to_cb[FFMIN(run,  15)]);
@@ -350,12 +340,10 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
 
         i = pos >> log2_block_count;
 
-        sign = SHOW_SBITS(re, gb, 1);
-        SKIP_BITS(re, gb, 1);
+        sign = bitstream_read_signed(gb, 1);
         out[((pos & block_mask) << 6) + ctx->scan[i]] = ((level ^ sign) - sign);
     }
 
-    CLOSE_READER(re, gb);
     return 0;
 }
 
@@ -367,14 +355,14 @@ static int decode_slice_luma(AVCodecContext *avctx, SliceContext *slice,
     ProresContext *ctx = avctx->priv_data;
     LOCAL_ALIGNED_16(int16_t, blocks, [8*4*64]);
     int16_t *block;
-    GetBitContext gb;
+    BitstreamContext gb;
     int i, blocks_per_slice = slice->mb_count<<2;
     int ret;
 
     for (i = 0; i < blocks_per_slice; i++)
         ctx->bdsp.clear_block(blocks+(i<<6));
 
-    init_get_bits(&gb, buf, buf_size << 3);
+    bitstream_init8(&gb, buf, buf_size);
 
     decode_dc_coeffs(&gb, blocks, blocks_per_slice);
     if ((ret = decode_ac_coeffs(avctx, &gb, blocks, blocks_per_slice)) < 0)
@@ -400,14 +388,14 @@ static int decode_slice_chroma(AVCodecContext *avctx, SliceContext *slice,
     ProresContext *ctx = avctx->priv_data;
     LOCAL_ALIGNED_16(int16_t, blocks, [8*4*64]);
     int16_t *block;
-    GetBitContext gb;
+    BitstreamContext gb;
     int i, j, blocks_per_slice = slice->mb_count << log2_blocks_per_mb;
     int ret;
 
     for (i = 0; i < blocks_per_slice; i++)
         ctx->bdsp.clear_block(blocks+(i<<6));
 
-    init_get_bits(&gb, buf, buf_size << 3);
+    bitstream_init8(&gb, buf, buf_size);
 
     decode_dc_coeffs(&gb, blocks, blocks_per_slice);
     if ((ret = decode_ac_coeffs(avctx, &gb, blocks, blocks_per_slice)) < 0)
@@ -425,7 +413,7 @@ static int decode_slice_chroma(AVCodecContext *avctx, SliceContext *slice,
     return 0;
 }
 
-static void unpack_alpha(GetBitContext *gb, uint16_t *dst, int num_coeffs,
+static void unpack_alpha(BitstreamContext *gb, uint16_t *dst, int num_coeffs,
                          const int num_bits)
 {
     const int mask = (1 << num_bits) - 1;
@@ -435,11 +423,11 @@ static void unpack_alpha(GetBitContext *gb, uint16_t *dst, int num_coeffs,
     alpha_val = mask;
     do {
         do {
-            if (get_bits1(gb)) {
-                val = get_bits(gb, num_bits);
+            if (bitstream_read_bit(gb)) {
+                val = bitstream_read(gb, num_bits);
             } else {
                 int sign;
-                val  = get_bits(gb, num_bits == 16 ? 7 : 4);
+                val  = bitstream_read(gb, num_bits == 16 ? 7 : 4);
                 sign = val & 1;
                 val  = (val + 2) >> 1;
                 if (sign)
@@ -453,10 +441,10 @@ static void unpack_alpha(GetBitContext *gb, uint16_t *dst, int num_coeffs,
             }
             if (idx >= num_coeffs)
                 break;
-        } while (get_bits_left(gb)>0 && get_bits1(gb));
-        val = get_bits(gb, 4);
+        } while (bitstream_bits_left(gb)>0 && bitstream_read_bit(gb));
+        val = bitstream_read(gb, 4);
         if (!val)
-            val = get_bits(gb, 11);
+            val = bitstream_read(gb, 11);
         if (idx + val > num_coeffs)
             val = num_coeffs - idx;
         if (num_bits == 16) {
@@ -478,7 +466,7 @@ static void decode_slice_alpha(ProresContext *ctx,
                                const uint8_t *buf, int buf_size,
                                int blocks_per_slice)
 {
-    GetBitContext gb;
+    BitstreamContext gb;
     int i;
     LOCAL_ALIGNED_16(int16_t, blocks, [8*4*64]);
     int16_t *block;
@@ -486,7 +474,7 @@ static void decode_slice_alpha(ProresContext *ctx,
     for (i = 0; i < blocks_per_slice<<2; i++)
         ctx->bdsp.clear_block(blocks+(i<<6));
 
-    init_get_bits(&gb, buf, buf_size << 3);
+    bitstream_init8(&gb, buf, buf_size);
 
     if (ctx->alpha_info == 2) {
         unpack_alpha(&gb, blocks, blocks_per_slice * 4 * 64, 16);
