@@ -289,6 +289,7 @@ const AVCodecTag ff_codec_movvideo_tags[] = {
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '8', 'Y', '2') },
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '8', 'Y', '4') },
     { AV_CODEC_ID_MAGICYUV, MKTAG('M', '8', 'Y', 'A') },
+    { AV_CODEC_ID_MAGICYUV, MKTAG('M', 'Y', 'U', 'V') },
 
     { AV_CODEC_ID_SHEERVIDEO, MKTAG('S', 'h', 'r', '0') },
     { AV_CODEC_ID_SHEERVIDEO, MKTAG('S', 'h', 'r', '1') },
