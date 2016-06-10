@@ -36,6 +36,8 @@
 #include "lossless_videodsp.h"
 #include "thread.h"
 
+#define VLC_BITS 12
+
 typedef struct Slice {
     uint32_t start;
     uint32_t size;
@@ -121,7 +123,7 @@ static int huff_build10(VLC *vlc, uint8_t *len)
     }
 
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[1023].len, 12), 1024,
+    return ff_init_vlc_sparse(vlc, VLC_BITS, 1024,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
@@ -153,7 +155,7 @@ static int huff_build12(VLC *vlc, uint8_t *len)
     }
 
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[4095].len, 14), 4096,
+    return ff_init_vlc_sparse(vlc, VLC_BITS, 4096,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
@@ -185,7 +187,7 @@ static int huff_build(VLC *vlc, uint8_t *len)
     }
 
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[255].len, 12), 256,
+    return ff_init_vlc_sparse(vlc, VLC_BITS, 256,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
@@ -258,7 +260,7 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                     if (get_bits_left(&gb) <= 0)
                         return AVERROR_INVALIDDATA;
 
-                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, 3);
+                    pix = get_vlc2(&gb, s->vlc[i].table, VLC_BITS, 3);
                     if (pix < 0)
                         return AVERROR_INVALIDDATA;
 
@@ -388,7 +390,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                     if (get_bits_left(&gb) <= 0)
                         return AVERROR_INVALIDDATA;
 
-                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, 3);
+                    pix = get_vlc2(&gb, s->vlc[i].table, VLC_BITS, 3);
                     if (pix < 0)
                         return AVERROR_INVALIDDATA;
 
