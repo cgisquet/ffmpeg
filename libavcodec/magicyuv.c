@@ -27,11 +27,14 @@
 
 #include "avcodec.h"
 #include "bytestream.h"
-#include "get_bits.h"
+#include "huffjoint.h"
 #include "huffyuvdsp.h"
 #include "internal.h"
 #include "lossless_videodsp.h"
 #include "thread.h"
+
+#define VLC_BITS 12
+#define MAX_VLC_N 16384
 
 typedef struct Slice {
     uint32_t start;
@@ -61,14 +64,15 @@ typedef struct MagicYUVContext {
     int               color_matrix;   // video color matrix
     int               flags;
     int               interlaced;     // video is interlaced
+    int               vlc_n;
     uint8_t          *buf;            // pointer to AVPacket->data
     int               hshift[4];
     int               vshift[4];
     Slice            *slices[4];      // slice bitstream positions for each plane
     unsigned int      slices_size[4]; // slice sizes for each plane
     uint8_t           len[4][4096];   // table of code lengths for each plane
-    VLC               vlc[4];         // VLC for each plane
-    int (*huff_build)(VLC *vlc, uint8_t *len);
+    VLC               vlc[8];         // VLC for each plane
+    int (*huff_build)(VLC *vlc, VLC *jvlc, uint8_t *len, int mask);
     int (*magy_decode_slice)(AVCodecContext *avctx, void *tdata,
                              int j, int threadnr);
     LLVidDSPContext   llviddsp;
@@ -92,14 +96,19 @@ static int huff_cmp_len12(const void *a, const void *b)
     return (aa->len - bb->len) * 4096 + aa->sym - bb->sym;
 }
 
-static int huff_build10(VLC *vlc, uint8_t *len)
+static int huff_build10(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
 {
     HuffEntry he[1024];
     uint32_t codes[1024];
     uint8_t bits[1024];
     uint16_t syms[1024];
+    uint16_t lut[1024];
+    uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
     int i;
+
+    if (!jsym)
+        return AVERROR(ENOMEM);
 
     for (i = 0; i < 1024; i++) {
         he[i].sym = 1023 - i;
@@ -113,25 +122,38 @@ static int huff_build10(VLC *vlc, uint8_t *len)
     for (i = 1023; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 1023 - he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
+    // generate joint table
+    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
+                          codes, codes, bits, bits, lut, lut)) {
+        av_freep(&jsym);
+        return AVERROR_INVALIDDATA;
+    }
+
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[1023].len, 12), 1024,
+    return ff_init_vlc_sparse(vlc, FFMIN(he[1023].len, VLC_BITS), 1024,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
 }
 
-static int huff_build12(VLC *vlc, uint8_t *len)
+static int huff_build12(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
 {
     HuffEntry he[4096];
     uint32_t codes[4096];
     uint8_t bits[4096];
     uint16_t syms[4096];
+    uint16_t lut[4096];
+    uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
     int i;
+
+    if (!jsym)
+        return AVERROR(ENOMEM);
 
     for (i = 0; i < 4096; i++) {
         he[i].sym = 4095 - i;
@@ -145,25 +167,38 @@ static int huff_build12(VLC *vlc, uint8_t *len)
     for (i = 4095; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 4095 - he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
+    // generate joint table
+    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
+                          codes, codes, bits, bits, lut, lut)) {
+        av_freep(&jsym);
+        return AVERROR_INVALIDDATA;
+    }
+
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[4095].len, 14), 4096,
+    return ff_init_vlc_sparse(vlc, FFMIN(he[4095].len, VLC_BITS), 4096,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
 }
 
-static int huff_build(VLC *vlc, uint8_t *len)
+static int huff_build(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
 {
     HuffEntry he[256];
     uint32_t codes[256];
     uint8_t bits[256];
     uint8_t syms[256];
+    uint16_t lut[256];
+    uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
     int i;
+
+    if (!jsym)
+        return AVERROR(ENOMEM);
 
     for (i = 0; i < 256; i++) {
         he[i].sym = 255 - i;
@@ -177,12 +212,20 @@ static int huff_build(VLC *vlc, uint8_t *len)
     for (i = 255; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 255 - he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
+    // generate joint table
+    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
+                          codes, codes, bits, bits, lut, lut)) {
+        av_freep(&jsym);
+        return AVERROR_INVALIDDATA;
+    }
+
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[255].len, 12), 256,
+    return ff_init_vlc_sparse(vlc, FFMIN(he[255].len, VLC_BITS), 256,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
@@ -208,6 +251,11 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
     *left     = l;
     *left_top = lt;
 }
+
+#define READ_2PIX_PLANE(dst0, dst1, plane, OP) \
+    GET_VLC_DUAL(dst0, dst1, &gb, s->vlc[4+plane].table, \
+                 s->vlc[plane].table, s->vlc[plane].table, \
+                 VLC_BITS, 3, OP)
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -249,17 +297,23 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
+            int count = width/2;
             for (k = 0; k < height; k++) {
-                for (x = 0; x < width; x++) {
-                    int pix;
-                    if (get_bits_left(&gb) <= 0)
-                        return AVERROR_INVALIDDATA;
-
-                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, 3);
-                    if (pix < 0)
-                        return AVERROR_INVALIDDATA;
-
-                    dst[x] = max - pix;
+                if (count >= (get_bits_left(&gb)) / (32 * 2)) {
+                    for (x = 0; x < count && get_bits_left(&gb) > 0; x++) {
+                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP14bits);
+                    }
+                } else {
+                    for (x = 0; x < count; x++) {
+                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP14bits);
+                    }
+                }
+                if( width&1 && get_bits_left(&gb)>0 ) {
+                    unsigned int index;
+                    int nb_bits, code, n;
+                    index = show_bits(&gb, VLC_BITS);
+                    VLC_INTERN(dst[width-1], s->vlc[i].table,
+                               &gb, VLC_BITS, 3);
                 }
                 dst += stride;
             }
@@ -379,17 +433,23 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
+            int count = width/2;
             for (k = 0; k < height; k++) {
-                for (x = 0; x < width; x++) {
-                    int pix;
-                    if (get_bits_left(&gb) <= 0)
-                        return AVERROR_INVALIDDATA;
-
-                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, 3);
-                    if (pix < 0)
-                        return AVERROR_INVALIDDATA;
-
-                    dst[x] = 255 - pix;
+                if (count >= (get_bits_left(&gb)) / (32 * 2)) {
+                    for (x = 0; x < count && get_bits_left(&gb) > 0; x++) {
+                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP8bits);
+                    }
+                } else {
+                    for (x = 0; x < count; x++) {
+                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP8bits);
+                    }
+                }
+                if( width&1 && get_bits_left(&gb)>0 ) {
+                    unsigned int index;
+                    int nb_bits, code, n;
+                    index = show_bits(&gb, VLC_BITS);
+                    VLC_INTERN(dst[width-1], s->vlc[i].table,
+                               &gb, VLC_BITS, 3);
                 }
                 dst += stride;
             }
@@ -491,7 +551,7 @@ static int build_huffman(AVCodecContext *avctx, GetBitContext *gbit, int max)
         j += l;
         if (j == max) {
             j = 0;
-            if (s->huff_build(&s->vlc[i], s->len[i])) {
+            if (s->huff_build(&s->vlc[i], &s->vlc[i+4], s->len[i], s->vlc_n)) {
                 av_log(avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
                 return AVERROR_INVALIDDATA;
             }
@@ -626,6 +686,8 @@ static int magy_decode_frame(AVCodecContext *avctx, void *data,
         s->huff_build = s->bps == 10 ? huff_build10 : huff_build12;
     s->planes = av_pix_fmt_count_planes(avctx->pix_fmt);
 
+    s->vlc_n = FFMIN(s->max, MAX_VLC_N);
+
     bytestream2_skip(&gbyte, 1);
     s->color_matrix = bytestream2_get_byte(&gbyte);
     s->flags        = bytestream2_get_byte(&gbyte);
@@ -749,6 +811,9 @@ static int magy_init_thread_copy(AVCodecContext *avctx)
         s->slices_size[i] = 0;
     }
 
+    for (i = 0; i < 8; i++)
+        s->vlc[i].table = NULL;
+
     return 0;
 }
 #endif
@@ -768,8 +833,9 @@ static av_cold int magy_decode_end(AVCodecContext *avctx)
     for (i = 0; i < FF_ARRAY_ELEMS(s->slices); i++) {
         av_freep(&s->slices[i]);
         s->slices_size[i] = 0;
-        ff_free_vlc(&s->vlc[i]);
     }
+    for (i = 0; i < 8; i++)
+        ff_free_vlc(&s->vlc[i]);
 
     return 0;
 }
