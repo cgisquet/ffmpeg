@@ -33,6 +33,8 @@
 #include "lossless_videodsp.h"
 #include "thread.h"
 
+#define VLC_BITS 10
+
 typedef struct Slice {
     uint32_t start;
     uint32_t size;
@@ -143,7 +145,7 @@ static int huff_build(VLC *vlc, uint8_t *len)
     }
 
     ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, FFMIN(he[255].len, 12), 256,
+    return ff_init_vlc_sparse(vlc, FFMIN(he[255].len, VLC_BITS), 256,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
@@ -342,8 +344,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                     int pix;
                     if (get_bits_left(&gb) <= 0)
                         return AVERROR_INVALIDDATA;
-
-                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, 3);
+                    pix = get_vlc2(&gb, s->vlc[i].table, s->vlc[i].bits, VLC_BITS);
                     if (pix < 0)
                         return AVERROR_INVALIDDATA;
 
