@@ -1348,14 +1348,21 @@ static int mov_read_colr(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return ret;
     if (strncmp(color_parameter_type, "nclx", 4) &&
         strncmp(color_parameter_type, "nclc", 4)) {
+        av_log(c->fc, AV_LOG_WARNING, "Supporting color_parameter_type %s as little endian\n",
+               color_parameter_type);
+        color_primaries = avio_rl16(pb);
+        color_trc = avio_rl16(pb);
+        color_matrix = avio_rl16(pb);
+    } else if (strncmp(color_parameter_type, "clcn", 4)) {
+        color_primaries = avio_rb16(pb);
+        color_trc = avio_rb16(pb);
+        color_matrix = avio_rb16(pb);
+    } else {
         av_log(c->fc, AV_LOG_WARNING, "unsupported color_parameter_type %s\n",
                color_parameter_type);
         return 0;
     }
 
-    color_primaries = avio_rb16(pb);
-    color_trc = avio_rb16(pb);
-    color_matrix = avio_rb16(pb);
 
     av_log(c->fc, AV_LOG_TRACE,
            "%s: pri %d trc %d matrix %d",
