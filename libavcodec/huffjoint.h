@@ -79,6 +79,9 @@
 /** Default operation for reading 8 bits elements */
 #define OP8bits(dst0, dst1, code) dst0 = code>>8; dst1 = code
 
+/** Default operation for reading <= 14 bits elements */
+#define OP14bits(dst0, dst1, code) dst0 = code>>8; dst1 = sign_extend(code, 8)
+
 /**
  * Generate an array suitable for ff_huff_joint_table_generate
  * @param numbits Number of bits of the VLC lut
