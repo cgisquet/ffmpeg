@@ -621,8 +621,6 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     GET_VLC_DUAL(dst0, dst1, re, &s->gb, s->vlc[4+plane].table, \
                  s->vlc[plane].table, s->vlc[plane].table, VLC_BITS, 3, OP)
 
-#define OP14bits(dst0, dst1, code) dst0 = code>>8; dst1 = sign_extend(code, 8)
-
 /* TODO instead of restarting the read when the code isn't in the first level
  * of the joint table, jump into the 2nd level of the individual table. */
 #define READ_2PIX_PLANE16(dst0, dst1, plane){\
