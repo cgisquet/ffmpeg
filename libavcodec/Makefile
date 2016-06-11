@@ -81,6 +81,7 @@ OBJS-$(CONFIG_H264PRED)                += h264pred.o
 OBJS-$(CONFIG_H264QPEL)                += h264qpel.o
 OBJS-$(CONFIG_HEVCPARSE)               += hevc_parse.o h2645_parse.o hevc_ps.o hevc_sei.o
 OBJS-$(CONFIG_HPELDSP)                 += hpeldsp.o
+OBJS-$(CONFIG_HUFFJOINT)               += huffjoint.o
 OBJS-$(CONFIG_HUFFMAN)                 += huffman.o
 OBJS-$(CONFIG_HUFFYUVDSP)              += huffyuvdsp.o
 OBJS-$(CONFIG_HUFFYUVENCDSP)           += huffyuvencdsp.o

@@ -33,7 +33,7 @@
 #define UNCHECKED_BITSTREAM_READER 1
 
 #include "avcodec.h"
-#include "get_bits.h"
+#include "huffjoint.h"
 #include "huffyuv.h"
 #include "huffyuvdsp.h"
 #include "lossless_videodsp.h"
@@ -118,46 +118,25 @@ static int read_len_table(uint8_t *dst, GetBitContext *gb, int n)
 static int generate_joint_tables(HYuvContext *s)
 {
     int ret;
-    uint16_t *symbols = av_mallocz(5 << VLC_BITS);
-    uint16_t *bits;
-    uint8_t *len;
+    uint16_t *symbols = ff_huff_joint_alloc(VLC_BITS);
     if (!symbols)
         return AVERROR(ENOMEM);
-    bits = symbols + (1 << VLC_BITS);
-    len = (uint8_t *)(bits + (1 << VLC_BITS));
 
     if (s->bitstream_bpp < 24 || s->version > 2) {
         int count = 1 + s->alpha + 2*s->chroma;
-        int p, i, y, u;
+        int p;
         for (p = 0; p < count; p++) {
             int p0 = s->version > 2 ? p : 0;
-            for (i = y = 0; y < s->vlc_n; y++) {
-                int len0  = s->len[p0][y];
-                int limit = VLC_BITS - len0;
-                if (limit <= 0 || !len0)
-                    continue;
-                if ((sign_extend(y, 8) & (s->vlc_n-1)) != y)
-                    continue;
-                for (u = 0; u < s->vlc_n; u++) {
-                    int len1 = s->len[p][u];
-                    if (len1 > limit || !len1)
-                        continue;
-                    if ((sign_extend(u, 8) & (s->vlc_n-1)) != u)
-                        continue;
-                    av_assert0(i < (1 << VLC_BITS));
-                    len[i]     = len0 + len1;
-                    bits[i]    = (s->bits[p0][y] << len1) + s->bits[p][u];
-                    symbols[i] = (y << 8) + (u & 0xFF);
-                        i++;
-                }
-            }
-            ff_free_vlc(&s->vlc[4 + p]);
-            if ((ret = ff_init_vlc_sparse(&s->vlc[4 + p], VLC_BITS, i, len, 1, 1,
-                                          bits, 2, 2, symbols, 2, 2, 0)) < 0)
+            if (ff_huff_joint_gen(&s->vlc[4 + p], symbols,
+                                  s->vlc_n, VLC_BITS,
+                                  s->bits[p0], s->bits[p],
+                                  s->len[p0], s->len[p], NULL, NULL))
                 goto out;
         }
     } else {
         uint8_t (*map)[4] = (uint8_t(*)[4]) s->pix_bgr_map;
+        uint16_t *bits    = symbols + (1 << VLC_BITS);
+        uint8_t  *len     = (uint8_t *)(bits + (1 << VLC_BITS));
         int i, b, g, r, code;
         int p0 = s->decorrelate;
         int p1 = !s->decorrelate;
@@ -602,54 +581,6 @@ static av_cold int decode_init_thread_copy(AVCodecContext *avctx)
     return 0;
 }
 #endif
-
-/** Subset of GET_VLC for use in hand-roller VLC code */
-#define VLC_INTERN(dst, table, gb, name, bits, max_depth)   \
-    code = table[index][0];                                 \
-    n    = table[index][1];                                 \
-    if (max_depth > 1 && n < 0) {                           \
-        LAST_SKIP_BITS(name, gb, bits);                     \
-        UPDATE_CACHE(name, gb);                             \
-                                                            \
-        nb_bits = -n;                                       \
-        index   = SHOW_UBITS(name, gb, nb_bits) + code;     \
-        code    = table[index][0];                          \
-        n       = table[index][1];                          \
-        if (max_depth > 2 && n < 0) {                       \
-            LAST_SKIP_BITS(name, gb, nb_bits);              \
-            UPDATE_CACHE(name, gb);                         \
-                                                            \
-            nb_bits = -n;                                   \
-            index   = SHOW_UBITS(name, gb, nb_bits) + code; \
-            code    = table[index][0];                      \
-            n       = table[index][1];                      \
-        }                                                   \
-    }                                                       \
-    dst = code;                                             \
-    LAST_SKIP_BITS(name, gb, n)
-
-
-#define GET_VLC_DUAL(dst0, dst1, name, gb, dtable, table1, table2,  \
-                     bits, max_depth, OP)                           \
-    do {                                                            \
-        unsigned int index = SHOW_UBITS(name, gb, bits);            \
-        int          code, n = dtable[index][1];                    \
-                                                                    \
-        if (n<=0) {                                                 \
-            int nb_bits;                                            \
-            VLC_INTERN(dst0, table1, gb, name, bits, max_depth);    \
-                                                                    \
-            UPDATE_CACHE(re, gb);                                   \
-            index = SHOW_UBITS(name, gb, bits);                     \
-            VLC_INTERN(dst1, table2, gb, name, bits, max_depth);    \
-        } else {                                                    \
-            code = dtable[index][0];                                \
-            OP(dst0, dst1, code);                                   \
-            LAST_SKIP_BITS(name, gb, n);                            \
-        }                                                           \
-    } while (0)
-
-#define OP8bits(dst0, dst1, code) dst0 = code>>8; dst1 = code
 
 #define READ_2PIX(dst0, dst1, plane1)                                   \
     UPDATE_CACHE(re, &s->gb);                                           \
