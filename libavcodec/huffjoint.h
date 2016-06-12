@@ -154,7 +154,8 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
  * the output.
  */
 int ff_huff_joint4_gen(VLC *vlc, void *array, int num, int numbits,
-                       const uint32_t* bits, const uint8_t* len,
-                       const uint16_t* lut);
+                       const uint32_t* bits0, const uint32_t* bits1,
+                       const uint8_t* len0, const uint8_t* len1,
+                       const uint16_t* lut0, const uint16_t* lut1);
 
 #endif /* AVCODEC_HUFF_JOINT_H */

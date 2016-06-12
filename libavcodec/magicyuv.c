@@ -186,7 +186,7 @@ static int huff_build(VLC *vlc, uint8_t *len, int mask)
     // 4-joint table
     vlc += 4;
     return ff_huff_joint4_gen(vlc, jsym, mask, VLC_BITS,
-                              codes, bits, lut);
+                              codes, codes, bits, bits, lut, lut);
 }
 
 static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
