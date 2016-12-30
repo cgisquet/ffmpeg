@@ -215,9 +215,36 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
                  s->vlc[plane].table, s->vlc[plane].table, \
                  VLC_BITS, 3, OP)
 
+#define GET_VLC_ITER(dst, off, bc, Ftable, Dtable, table, bits, max_depth) \
+    do {                                                                   \
+        unsigned int index = bitstream_peek(bc, bits);                     \
+        int          code, n = Ftable[index][1];                           \
+                                                                           \
+        if (n<=0) {                                                        \
+            n = Dtable[index][1];                                          \
+            if (n<=0) {                                                    \
+                int nb_bits;                                               \
+                VLC_INTERN(dst[off], table, bc, bits, max_depth);          \
+                off++;                                                     \
+            } else {                                                       \
+                code = Dtable[index][0];                                   \
+                OP8bits(dst[off+0], dst[off+1], code);                     \
+                off += 2;                                                  \
+                bitstream_skip(bc, n);                                     \
+            }                                                              \
+        } else {                                                           \
+            code = Ftable[index][0];                                       \
+            dst[off+0] =  code>>12;    dst[off+1] = (code>>8)&7;           \
+            dst[off+2] = (code>> 4)&7; dst[off+3] = code&7;                \
+            off += 4;                                                      \
+            bitstream_skip(bc, n);                                         \
+        }                                                                  \
+    } while (0)
+
 #define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_MULTI(dst, off, &bc, s->vlc[8+plane].table, \
-                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+    GET_VLC_ITER(dst, off, &bc, s->vlc[8+plane].table, \
+                 s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -392,18 +419,17 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
-            int count = width/4;
             for (k = 0; k < height; k++) {
-                if (count >= bitstream_bits_left(&bc) / (32 * 4)) {
-                    for (x = 0; x < count && bitstream_bits_left(&bc) > 0; x++) {
-                        READ_4PIX_PLANE(dst, 4*x, i);
+                if (width >= bitstream_bits_left(&bc) / 32) {
+                    for (x = 0; x < width-4 && bitstream_bits_left(&bc) > 0;) {
+                        READ_4PIX_PLANE(dst, x, i);
                     }
                 } else {
-                    for (x = 0; x < count; x++) {
-                        READ_4PIX_PLANE(dst, 4*x, i);
+                    for (x = 0; x < width-4;) {
+                        READ_4PIX_PLANE(dst, x, i);
                     }
                 }
-                x *= 4;
+
                 for( ; x < width && bitstream_bits_left(&bc)>0; x++ ) {
                     unsigned int index;
                     int nb_bits, code, n;
