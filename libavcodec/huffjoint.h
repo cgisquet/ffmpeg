@@ -154,4 +154,14 @@ int ff_huff_joint4_gen(VLC *vlc, void *array, int num, int numbits,
                        const uint8_t* len0, const uint8_t* len1,
                        const uint16_t* lut0, const uint16_t* lut1);
 
+/**
+ * Generate a table suitable for decoding 4 VLCs at a time.
+ * Simplified version of ff_huff_joint_gen: single dictionary,
+ * decoded value limited to [0,15] so 4 of them fit on the 16bits of
+ * the output.
+ */
+uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
+                                 const uint32_t* bits, const uint8_t* len,
+                                 const uint16_t* lut);
+
 #endif /* AVCODEC_HUFF_JOINT_H */
