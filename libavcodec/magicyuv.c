@@ -166,7 +166,7 @@ static int huff_build10(MagicYUVContext *s, int p, int mask)
     // 4-joint table
     vlc += 4;
     lut4 = ff_huff_joint4same_gen(vlc, jsym, mask, VLC_BITS,
-                                  codes, bits, lut);
+                                  codes, codes, bits, bits, lut, lut);
     if (!lut4) {
         goto err;
     }
@@ -250,7 +250,7 @@ static int huff_build12(MagicYUVContext *s, int p, int mask)
     // 4-joint table
     vlc += 4;
     lut4 = ff_huff_joint4same_gen(vlc, jsym, mask, VLC_BITS,
-                                  codes, bits, lut);
+                                  codes, codes, bits, bits, lut, lut);
     if (!lut4) {
         goto err;
     }
@@ -340,7 +340,7 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
 
     // 4-joint table
     lut4 = ff_huff_joint4same_gen(&vlc4, jsym, mask, VLC_BITS,
-                                  codes, bits, lut);
+                                  codes, codes, bits, bits, lut, lut);
     if (!lut4) {
         goto err;
     }
