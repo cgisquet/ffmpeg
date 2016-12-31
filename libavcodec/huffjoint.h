@@ -109,9 +109,9 @@
             GET_VLC_DUAL_INTERNAL(dst[off+2], dst[off+3], name, gb, Dtable,\
                                   table, table, bits, max_depth, OP8bits)\
         } else {                                                         \
-            code = Ftable[index][0];                                     \
-            dst[off+0] =  code>>12;    dst[off+1] = (code>>8)&7;         \
-            dst[off+2] = (code>> 4)&7; dst[off+3] = code&7;              \
+            code = (unsigned int)Ftable[index][0];                       \
+            dst[off+0] =  code>>12;     dst[off+1] = (code>>8)&15;       \
+            dst[off+2] = (code>> 4)&15; dst[off+3] = code&15;            \
             LAST_SKIP_BITS(name, gb, n);                                 \
         }                                                                \
     } while (0)
