@@ -290,6 +290,7 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     uint32_t code;
     uint32_t *lut4;
     int i;
+    int val = 0;
 
     if (!jsym)
         return AVERROR(ENOMEM);
@@ -314,6 +315,10 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
         syms[i]  = 255 - he[i].sym;
         lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
+    }
+    if (len[0] == 1) {
+        // Symbol for 8 zeros
+        val = bits[0] ? 0x100 : 0x1;
     }
 
     ff_free_vlc(vlc);
@@ -354,6 +359,14 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
 
     av_free(lut4);
 
+    if (val) {
+        // Add 8 wide entries for it
+        for (i = (val-1)<<(VLC_BITS-8); i < val<<(VLC_BITS-8); i++) {
+            s->mem[p][i].len = 8;
+            s->mem[p][i].type = 2;
+        }
+    }
+
     return 0;
 
 err:
@@ -393,12 +406,12 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
         unsigned int index = SHOW_UBITS(name, gb, bits);            \
         int          code, n = JTable[index].len;                   \
                                                                     \
-        if (n<=0) {                                                 \
-            int nb_bits;                                            \
-            VLC_INTERN(dst[off], table, gb, name, bits, max_depth); \
-            off++;                                                  \
-        } else {                                                    \
-            if (JTable[index].type) {                               \
+        if (n>0) {                                                  \
+            if (JTable[index].type == 2) {                          \
+                AV_ZERO64(dst+off);                                 \
+                off += 8;                                           \
+                SKIP_BITS(name, gb, 8);                             \
+            } else if (JTable[index].type) {                        \
                 AV_WN32(dst+off, JTable[index].code.for4);          \
                 off += 4;                                           \
                 SKIP_BITS(name, gb, n);                             \
@@ -407,6 +420,10 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
                 off += 2;                                           \
                 SKIP_BITS(name, gb, n);                             \
             }                                                       \
+        } else {                                                    \
+            int nb_bits;                                            \
+            VLC_INTERN(dst[off], table, gb, name, bits, max_depth); \
+            off++;                                                  \
         }                                                           \
     } while (0)
 
@@ -597,11 +614,11 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
             OPEN_READER(re, &gb);
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-4 && BITS_LEFT(re, &gb) > 0;) {
+                    for (x = 0; x < width-8 && BITS_LEFT(re, &gb) > 0;) {
                         READ_4PIX_PLANE(dst, x, i);
                     }
                 } else {
-                    for (x = 0; x < width-4;) {
+                    for (x = 0; x < width-8;) {
                         READ_4PIX_PLANE(dst, x, i);
                     }
                 }
