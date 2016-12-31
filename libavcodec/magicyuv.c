@@ -210,7 +210,7 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
 
     // 4-joint table
     lut4 = ff_huff_joint4same_gen(&vlc4, jsym, mask, VLC_BITS,
-                                  codes, bits, lut);
+                                  codes, codes, bits, bits, lut, lut);
     if (!lut4) {
         goto err;
     }

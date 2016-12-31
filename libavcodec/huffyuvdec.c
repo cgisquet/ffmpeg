@@ -131,12 +131,14 @@ static int generate_joint_tables(HYuvContext *s)
                                   s->len[p0], s->len[p], NULL, NULL))
                 goto out;
 
-            if ((s->version > 2 || (!s->yuy2 && s->bitstream_bpp == 12)) &&
-                ff_huff_joint4_gen(&s->vlc[8 + p], symbols,
-                                   s->vlc_n, VLC_BITS,
-                                   s->bits[p0], s->bits[p],
-                                   s->len[p0], s->len[p], NULL, NULL))
-                goto out;
+            if (s->version > 2 || s->bitstream_bpp == 12) {
+                s->lut4[p] = ff_huff_joint4same_gen(&s->vlc[8 + p], symbols,
+                                                    s->vlc_n, VLC_BITS,
+                                                    s->bits[p0], s->bits[p],
+                                                    s->len[p0], s->len[p], NULL, NULL);
+                if (!s->lut4[p])
+                    goto out;
+            }
         }
     } else {
         uint8_t (*map)[4] = (uint8_t(*)[4]) s->pix_bgr_map;
@@ -271,6 +273,9 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
     for (i = 0; i < 12; i++)
         ff_free_vlc(&s->vlc[i]);
+
+    for (i = 0; i < 4; i++)
+        av_freep(&s->lut4[i]);
 
     return 0;
 }
@@ -620,26 +625,50 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     }
 }
 
+#define GET_VLC_ITER(dst, off, bc, lut, Ftable, Dtable, table, bits, max_depth) \
+    do {                                                                   \
+        unsigned int index = bitstream_peek(bc, bits);                     \
+        int          code, n = Ftable[index][1];                           \
+                                                                           \
+        if (n<=0) {                                                        \
+            n = Dtable[index][1];                                          \
+            if (n<=0) {                                                    \
+                int nb_bits;                                               \
+                VLC_INTERN(dst[off], table, bc, bits, max_depth);          \
+                off++;                                                     \
+            } else {                                                       \
+                code = Dtable[index][0];                                   \
+                OP8bits(dst[off+0], dst[off+1], code);                     \
+                off += 2;                                                  \
+                bitstream_skip(bc, n);                                     \
+            }                                                              \
+        } else {                                                           \
+            code = Ftable[index][0];                                       \
+            AV_WN32(dst+off, lut[code]);                                   \
+            off += 4;                                                      \
+            bitstream_skip(bc, n);                                         \
+        }                                                                  \
+    } while (0)
+
 #define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_MULTI(dst, off, &s->bc, s->vlc[8+plane].table, \
-                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+    GET_VLC_ITER(dst, off, &s->bc, s->lut4[plane], s->vlc[8+plane].table, \
+                 s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
 
 static void decode_gray_bitstream(HYuvContext *s, int count)
 {
-    int i, count4 = count >> 2;
+    int i;
     uint8_t *dst = s->temp[0];
 
-    if (count4 >= bitstream_bits_left(&s->bc) / (32 * 4)) {
-        for (i = 0; i < count4 && bitstream_bits_left(&s->bc) > 0; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
+    if (count >= bitstream_bits_left(&s->bc) / 32) {
+        for (i = 0; i < count-4 && bitstream_bits_left(&s->bc) > 0;) {
+            READ_4PIX_PLANE(dst, i, 0);
         }
     } else {
-        for (i = 0; i < count4; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
+        for (i = 0; i < count-4;) {
+            READ_4PIX_PLANE(dst, i, 0);
         }
     }
 
-    i *= 4;
     for( ; i < count && bitstream_bits_left(&s->bc)>0; i++ ) {
         unsigned int index;
         int nb_bits, code, n;

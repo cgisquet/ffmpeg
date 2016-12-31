@@ -122,8 +122,9 @@ int ff_huff_joint4_gen(VLC *vlc, void *array, int num, int numbits,
 }
 
 uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
-                                 const uint32_t* bits, const uint8_t* l,
-                                 const uint16_t* lut)
+                                 const uint32_t* bits0, const uint32_t* bits1,
+                                 const uint8_t* l0, const uint8_t* l1,
+                                 const uint16_t* lut0, const uint16_t* lut1)
 {
     uint16_t *jsym  = array;
     uint16_t *jbits = jsym + (1 << numbits);
@@ -135,16 +136,16 @@ uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
     if (!outlut) return NULL;
 
     for (i = t0 = 0; t0 < num; t0++) {
-        int t1, idx0 = lut ? lut[t0] : t0;
-        int len0  = l[idx0];
+        int t1, idx0 = lut0 ? lut0[t0] : t0;
+        int len0  = l0[idx0];
         int limit0 = numbits - len0;
         if (limit0 < 3 || !len0) {
             if (t0 < num/2 && t0 < num-t0-1) t0 = num-t0-2;
             continue;
         }
         for (t1 = 0; t1 < num; t1++) {
-            int t2, idx1 = lut ? lut[t1] : t1;
-            int len1 = l[idx1];
+            int t2, idx1 = lut1 ? lut1[t1] : t1;
+            int len1 = l1[idx1];
             int limit1 = limit0 - len1;
             if (limit1 < 2 || !len1) {
                 if (t1 < num/2 && t1 < num-t1-1) t1 = num-t1-2;
@@ -152,8 +153,8 @@ uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
             }
 
             for (t2 = 0; t2 < num; t2++) {
-                int t3, idx2 = lut ? lut[t2] : t2;
-                int len2 = l[idx2];
+                int t3, idx2 = lut0 ? lut0[t2] : t2;
+                int len2 = l0[idx2];
                 int limit2 = limit1 - len2;
                 if (limit2 < 1 || !len2) {
                     if (t2 < num/2 && t2 < num-t2-1) t2 = num-t2-2;
@@ -166,16 +167,16 @@ uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
                         uint8_t  v8[4];
                     } a;
 
-                    int code, idx3 = lut ? lut[t3] : t3;
-                    int len3 = l[idx3];
+                    int code, idx3 = lut1 ? lut1[t3] : t3;
+                    int len3 = l1[idx3];
                     if (limit2 < len3 || !len3) {
                         if (t3 < num/2 && t3 < num-t3-1) t3 = num-t3-2;
                         continue;
                     }
                     av_assert0(i < (1 << numbits));
-                    code = (bits[idx0] << len1) | bits[idx1];
-                    code = (code << len2) | bits[idx2];
-                    jbits[i] = (code << len3) | bits[idx3];
+                    code = (bits0[idx0] << len1) | bits1[idx1];
+                    code = (code << len2) | bits0[idx2];
+                    jbits[i] = (code << len3) | bits1[idx3];
                     jlen[i] = len0 + len1 + len2 + len3;
                     a.v8[0] = t0; a.v8[1] = t1;
                     a.v8[2] = t2; a.v8[3] = t3;
