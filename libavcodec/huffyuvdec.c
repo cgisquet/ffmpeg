@@ -130,7 +130,9 @@ static int generate_joint_tables(HYuvContext *s)
                                   s->bits[p0], s->bits[p],
                                   s->len[p0], s->len[p], NULL, NULL))
                 goto out;
-            if (ff_huff_joint4_gen(&s->vlc[8 + p], symbols,
+
+            if ((s->version > 2 || (!s->yuy2 && s->bitstream_bpp == 12)) &&
+                ff_huff_joint4_gen(&s->vlc[8 + p], symbols,
                                    s->vlc_n, VLC_BITS,
                                    s->bits[p0], s->bits[p],
                                    s->len[p0], s->len[p], NULL, NULL))
