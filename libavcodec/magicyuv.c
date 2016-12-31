@@ -53,6 +53,15 @@ typedef struct HuffEntry {
     uint32_t code;
 } HuffEntry;
 
+typedef struct JointTable {
+    int8_t  len;
+    uint8_t type;
+    union {
+        uint16_t  for2;
+        uint32_t  for4;
+    } code;
+} JointTable;
+
 typedef struct MagicYUVContext {
     AVFrame          *p;
     int               max;
@@ -71,8 +80,8 @@ typedef struct MagicYUVContext {
     unsigned int      slices_size[4]; // slice sizes for each plane
     uint8_t           len[4][1024];   // table of code lengths for each plane
     VLC               vlc[12];        // VLC for each plane
-    uint32_t         *lut4[4];
-    int (*huff_build)(VLC *vlc, uint8_t *len, uint32_t **lut, int mask);
+    JointTable       *mem[4];
+    int (*huff_build)(struct MagicYUVContext *s, int plane, int mask);
     int (*magy_decode_slice)(AVCodecContext *avctx, void *tdata,
                              int j, int threadnr);
     LLVidDSPContext   llviddsp;
@@ -90,8 +99,10 @@ static int huff_cmp_len10(const void *a, const void *b)
     return (aa->len - bb->len) * 1024 + aa->sym - bb->sym;
 }
 
-static int huff_build10(VLC *vlc, uint8_t *len, uint32_t **outlut, int mask)
+static int huff_build10(MagicYUVContext *s, int p, int mask)
 {
+    VLC *vlc = s->vlc+p;
+    uint8_t *len = (uint8_t *)(s->len+p);
     HuffEntry he[1024];
     uint32_t codes[1024];
     uint8_t bits[1024];
@@ -136,8 +147,10 @@ static int huff_build10(VLC *vlc, uint8_t *len, uint32_t **outlut, int mask)
                              codes, codes, bits, bits, lut, lut);
 }
 
-static int huff_build(VLC *vlc, uint8_t *len, uint32_t **outlut, int mask)
+static int huff_build(MagicYUVContext *s, int p, int mask)
 {
+    VLC *vlc = s->vlc+p;
+    uint8_t *len = (uint8_t *)(s->len+p);
     HuffEntry he[256];
     uint32_t codes[256];
     uint8_t bits[256];
@@ -145,9 +158,15 @@ static int huff_build(VLC *vlc, uint8_t *len, uint32_t **outlut, int mask)
     uint16_t lut[256];
     uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
+    uint32_t *lut4;
     int i;
 
     if (!jsym)
+        return AVERROR(ENOMEM);
+
+    av_freep(&s->mem[p]);
+    s->mem[p] = av_malloc((1<<VLC_BITS)*sizeof(JointTable));
+    if (!s->mem[p])
         return AVERROR(ENOMEM);
 
     for (i = 0; i < 256; i++) {
@@ -172,27 +191,44 @@ static int huff_build(VLC *vlc, uint8_t *len, uint32_t **outlut, int mask)
                            bits,  sizeof(*bits),  sizeof(*bits),
                            codes, sizeof(*codes), sizeof(*codes),
                            syms,  sizeof(*syms),  sizeof(*syms), 0)) {
-        av_freep(&jsym);
-        return AVERROR_INVALIDDATA;
+        goto err;
     }
 
     // generate 2-joint table
     vlc += 4;
     if (ff_huff_joint_gen(vlc, jsym, mask, VLC_BITS,
                           codes, codes, bits, bits, lut, lut)) {
-        av_freep(&jsym);
-        return AVERROR_INVALIDDATA;
+        goto err;
     }
 
     // 4-joint table
     vlc += 4;
-    *outlut = ff_huff_joint4same_gen(vlc, jsym, mask, VLC_BITS,
-                                     codes, bits, lut);
-    if (!*outlut) {
-        av_freep(&jsym);
-        return AVERROR_INVALIDDATA;
+    lut4 = ff_huff_joint4same_gen(vlc, jsym, mask, VLC_BITS,
+                                  codes, bits, lut);
+    if (!lut4) {
+        goto err;
     }
+
+    for (i = 0; i < 1<<VLC_BITS; i++) {
+        if (s->vlc[8+p].table[i][1] > 0) {
+            s->mem[p][i].len  = s->vlc[8+p].table[i][1];
+            s->mem[p][i].type = 1;
+            s->mem[p][i].code.for4 = lut4[s->vlc[8+p].table[i][0]];
+        } else if (s->vlc[4+p].table[i][1] > 0) {
+            s->mem[p][i].len  = s->vlc[4+p].table[i][1];
+            s->mem[p][i].type = 0;
+            AV_WB16(&s->mem[p][i].code.for2, s->vlc[4+p].table[i][0]);
+        } else
+            s->mem[p][i].len = -1;
+    }
+
+    av_free(lut4);
+
     return 0;
+
+err:
+    av_freep(&jsym);
+    return AVERROR_INVALIDDATA;
 }
 
 static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
@@ -221,34 +257,30 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
                  s->vlc[plane].table, s->vlc[plane].table, \
                  VLC_BITS, 3, OP)
 
-#define GET_VLC_ITER(dst, off, bc, lut, Ftable, Dtable, table, bits, max_depth) \
-    do {                                                                   \
-        unsigned int index = bitstream_peek(bc, bits);                     \
-        int          code, n = Ftable[index][1];                           \
-                                                                           \
-        if (n<=0) {                                                        \
-            n = Dtable[index][1];                                          \
-            if (n<=0) {                                                    \
-                int nb_bits;                                               \
-                VLC_INTERN(dst[off], table, bc, bits, max_depth);          \
-                off++;                                                     \
-            } else {                                                       \
-                code = Dtable[index][0];                                   \
-                OP8bits(dst[off+0], dst[off+1], code);                     \
-                off += 2;                                                  \
-                bitstream_skip(bc, n);                                     \
-            }                                                              \
-        } else {                                                           \
-            code = Ftable[index][0];                                       \
-            AV_WN32(dst+off, lut[code]);                                   \
-            off += 4;                                                      \
-            bitstream_skip(bc, n);                                         \
-        }                                                                  \
+#define GET_VLC_ITER(dst, off, bc, JTable, table, bits, max_depth)  \
+    do {                                                            \
+        unsigned int index = bitstream_peek(bc, bits);              \
+        int          code, n = JTable[index].len;                   \
+                                                                    \
+        if (n<=0) {                                                 \
+            int nb_bits;                                            \
+            VLC_INTERN(dst[off], table, bc, bits, max_depth);       \
+            off++;                                                  \
+        } else {                                                    \
+            if (JTable[index].type) {                               \
+                AV_WN32(dst+off, JTable[index].code.for4);          \
+                off += 4;                                           \
+                bitstream_skip(bc, n);                              \
+            } else {                                                \
+                AV_WN16(dst+off, JTable[index].code.for2);          \
+                off += 2;                                           \
+                bitstream_skip(bc, n);                              \
+            }                                                       \
+        }                                                           \
     } while (0)
 
 #define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_ITER(dst, off, &bc, s->lut4[plane], s->vlc[8+plane].table, \
-                 s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+    GET_VLC_ITER(dst, off, &bc, s->mem[plane], s->vlc[plane].table, VLC_BITS, 3)
 
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
@@ -542,7 +574,7 @@ static int build_huffman(AVCodecContext *avctx, BitstreamContext *bc, int max)
         j += l;
         if (j == max) {
             j = 0;
-            if (s->huff_build(&s->vlc[i], s->len[i], &s->lut4[i], s->vlc_n)) {
+            if (s->huff_build(s, i, s->vlc_n)) {
                 av_log(avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
                 return AVERROR_INVALIDDATA;
             }
@@ -784,6 +816,8 @@ static int magy_init_thread_copy(AVCodecContext *avctx)
     MagicYUVContext *s = avctx->priv_data;
     int i;
 
+    memset(s->mem, 0, sizeof(s->mem));
+
     for (i = 0; i < FF_ARRAY_ELEMS(s->slices); i++) {
         s->slices[i] = NULL;
         s->slices_size[i] = 0;
@@ -810,11 +844,12 @@ static av_cold int magy_decode_end(AVCodecContext *avctx)
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->slices); i++) {
         av_freep(&s->slices[i]);
-        av_freep(&s->lut4[i]);
         s->slices_size[i] = 0;
     }
     for (i = 0; i < 12; i++)
         ff_free_vlc(&s->vlc[i]);
+    for (i = 0; i < 4; i++)
+        av_freep(&s->mem[i]);
 
     return 0;
 }
