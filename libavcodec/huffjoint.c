@@ -109,7 +109,7 @@ int ff_huff_joint4_gen(VLC *vlc, void *array, int num, int numbits,
                     code = (code << len2) | bits0[idx2];
                     jbits[i] = (code << len3) | bits1[idx3];
                     jlen[i] = len0 + len1 + len2 + len3;
-                    jsym[i]  = (t0<<12)|(t1<<8)|(t2<<4)|(t3&7);
+                    jsym[i]  = (t0<<12)|(t1<<8)|(t2<<4)|(t3&15);
                     i++;
                 }
             }
