@@ -26,6 +26,15 @@
 
 #include "get_bits.h"
 
+typedef struct JointTable {
+    int8_t  len;
+    uint8_t type;
+    union {
+        uint16_t  for2;
+        uint32_t  for4;
+    } code;
+} JointTable;
+
 /** Subset of GET_VLC for use in hand-roller VLC code */
 #define VLC_INTERN(dst, table, gb, name, bits, max_depth)   \
     code = table[index][0];                                 \

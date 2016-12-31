@@ -36,7 +36,7 @@
 
 #include "avcodec.h"
 #include "bswapdsp.h"
-#include "get_bits.h"
+#include "huffjoint.h"
 #include "huffyuvdsp.h"
 #include "huffyuvencdsp.h"
 #include "put_bits.h"
@@ -89,6 +89,7 @@ typedef struct HYuvContext {
     VLC vlc[12];                             //Y,U,V,A,YY,YU,YV,AA
     uint8_t *bitstream_buffer;
     uint32_t         *lut4[4];
+    JointTable       *mem[4];
     unsigned int bitstream_buffer_size;
     BswapDSPContext bdsp;
     HuffYUVDSPContext hdsp;
