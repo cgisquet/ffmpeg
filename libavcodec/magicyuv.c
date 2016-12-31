@@ -53,15 +53,6 @@ typedef struct HuffEntry {
     uint32_t code;
 } HuffEntry;
 
-typedef struct JointTable {
-    int8_t  len;
-    uint8_t type;
-    union {
-        uint16_t  for2;
-        uint32_t  for4;
-    } code;
-} JointTable;
-
 typedef struct MagicYUVContext {
     AVFrame          *p;
     int               max;

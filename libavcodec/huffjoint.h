@@ -25,6 +25,16 @@
 #define AVCODEC_HUFF_JOINT_H
 
 #include "bitstream.h"
+#include "vlc.h"
+
+typedef struct JointTable {
+    int8_t  len;
+    uint8_t type;
+    union {
+        uint16_t  for2;
+        uint32_t  for4;
+    } code;
+} JointTable;
 
 /** Subset of GET_VLC for use in hand-roller VLC code */
 #define VLC_INTERN(dst, table, bc, bits, max_depth)         \
