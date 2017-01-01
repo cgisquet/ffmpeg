@@ -620,14 +620,39 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     }
 }
 
+#define READ_4PIX_PLANE(dst, off, plane) \
+    GET_VLC_MULTI(dst, off, &s->bc, s->vlc[8+plane].table, \
+                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+
+static void decode_gray_bitstream(HYuvContext *s, int count)
+{
+    int i, count4 = count >> 2;
+    uint8_t *dst = s->temp[0];
+
+    if (count4 >= bitstream_bits_left(&s->bc) / (32 * 4)) {
+        for (i = 0; i < count4 && bitstream_bits_left(&s->bc) > 0; i++) {
+            READ_4PIX_PLANE(dst, 4*i, 0);
+        }
+    } else {
+        for (i = 0; i < count4; i++) {
+            READ_4PIX_PLANE(dst, 4*i, 0);
+        }
+    }
+
+    i *= 4;
+    for( ; i < count && bitstream_bits_left(&s->bc)>0; i++ ) {
+        unsigned int index;
+        int nb_bits, code, n;
+        index = bitstream_peek(&s->bc, VLC_BITS);
+        VLC_INTERN(dst[i], s->vlc[0].table,
+                   &s->bc, VLC_BITS, 3);
+    }
+}
+
 #define READ_2PIX_PLANE(dst0, dst1, plane, OP) \
     /* //UPDATE_CACHE(re, &s->bc); */ \
     GET_VLC_DUAL(dst0, dst1, &s->bc, s->vlc[4+plane].table, \
                  s->vlc[plane].table, s->vlc[plane].table, VLC_BITS, 3, OP)
-
-#define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_MULTI(dst, off, &s->bc, s->vlc[8+plane].table, \
-                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
 
 /* TODO instead of restarting the read when the code isn't in the first level
  * of the joint table, jump into the 2nd level of the individual table. */
@@ -637,29 +662,13 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     dst1 = bitstream_read_vlc(&s->bc, s->vlc[plane].table, VLC_BITS, 3)<<2;\
     dst1 += bitstream_read(&s->bc, 2);\
 }
+
 static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
 {
     int i;
 
     if (s->bps <= 8) {
-        int count4 = width >> 2;
-        uint8_t *dst = s->temp[0];
-        if (count4 >= bitstream_bits_left(&s->bc) / (32 * 4)) {
-            for (i = 0; i < count4 && bitstream_bits_left(&s->bc) > 0; i++) {
-                READ_4PIX_PLANE(dst, 4*i, 0);
-            }
-        } else {
-            for (i = 0; i < count4; i++) {
-                READ_4PIX_PLANE(dst, 4*i, 0);
-            }
-        }
-
-        i *= 4;
-        for( ; i < width && bitstream_bits_left(&s->bc)>0; i++ ) {
-            int nb_bits, code, n;
-            unsigned int index = bitstream_peek(&s->bc, VLC_BITS);
-            VLC_INTERN(dst[i], s->vlc[0].table, &s->bc, VLC_BITS, 3);
-        }
+        decode_gray_bitstream(s, width);
     } else if (s->bps <= 14) {
         int count = width/2;
         if (count >= bitstream_bits_left(&s->bc) / (32 * 2)) {
@@ -693,31 +702,6 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
             int dst = bitstream_read_vlc(&s->bc, s->vlc[plane].table, VLC_BITS, 3)<<2;
             s->temp16[0][width-1] = dst + bitstream_read(&s->bc, 2);
         }
-    }
-}
-
-static void decode_gray_bitstream(HYuvContext *s, int count)
-{
-    int i, count4 = count >> 2;
-    uint8_t *dst = s->temp[0];
-
-    if (count4 >= bitstream_bits_left(&s->bc) / (32 * 4)) {
-        for (i = 0; i < count4 && bitstream_bits_left(&s->bc) > 0; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
-        }
-    } else {
-        for (i = 0; i < count4; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
-        }
-    }
-
-    i *= 4;
-    for( ; i < count && bitstream_bits_left(&s->bc)>0; i++ ) {
-        unsigned int index;
-        int nb_bits, code, n;
-        index = bitstream_peek(&s->bc, VLC_BITS);
-        VLC_INTERN(dst[i], s->vlc[0].table,
-                   &s->bc, VLC_BITS, 3);
     }
 }
 
