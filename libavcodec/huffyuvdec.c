@@ -621,20 +621,42 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     CLOSE_READER(re, &s->gb);
 }
 
+#define READ_4PIX_PLANE(dst, off, plane) \
+    GET_VLC_MULTI(dst, off, re, &s->gb, s->vlc[8+plane].table, \
+                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
+
+static void decode_gray_bitstream(HYuvContext *s, int count)
+{
+    int i, count4 = count >> 2;
+    uint8_t *dst = s->temp[0];
+    OPEN_READER(re, &s->gb);
+
+    if (count4 >= (BITS_LEFT(re, &s->gb)) / (32 * 4)) {
+        for (i = 0; i < count4 && BITS_LEFT(re, &s->gb) > 0; i++) {
+            READ_4PIX_PLANE(dst, 4*i, 0);
+        }
+    } else {
+        for (i = 0; i < count4; i++) {
+            READ_4PIX_PLANE(dst, 4*i, 0);
+        }
+    }
+    i *= 4;
+    for( ; i < count && BITS_LEFT(re, &s->gb)>0; i++ ) {
+        unsigned int index;
+        int nb_bits, code, n;
+        UPDATE_CACHE(re, &s->gb);
+        index = SHOW_UBITS(re,&s->gb, VLC_BITS);
+        VLC_INTERN(dst[i], s->vlc[0].table,
+                   &s->gb, re, VLC_BITS, 3);
+    }
+
+    CLOSE_READER(re, &s->gb);
+}
+
 #define READ_2PIX_PLANE(dst0, dst1, plane, OP) \
     UPDATE_CACHE(re, &s->gb); \
     GET_VLC_DUAL(dst0, dst1, re, &s->gb, s->vlc[4+plane].table, \
                  s->vlc[plane].table, s->vlc[plane].table, VLC_BITS, 3, OP)
-
-#define READ_4PIX_PLANE(dst, off, plane) \
-    UPDATE_CACHE(re, &s->gb); \
-    GET_VLC_MULTI(dst, off, re, &s->gb, s->vlc[8+plane].table, \
-                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
-
-#define READ_4PIX_PLANE(dst, off, plane) \
-    UPDATE_CACHE(re, &s->gb); \
-    GET_VLC_MULTI(dst, off, re, &s->gb, s->vlc[8+plane].table, \
-                  s->vlc[4+plane].table, s->vlc[plane].table, VLC_BITS, 3)
 
 /* TODO instead of restarting the read when the code isn't in the first level
  * of the joint table, jump into the 2nd level of the individual table. */
@@ -644,34 +666,13 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     dst1 = get_vlc2(&s->gb, s->vlc[plane].table, VLC_BITS, 3)<<2;\
     dst1 += get_bits(&s->gb, 2);\
 }
+
 static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
 {
     int i;
 
     if (s->bps <= 8) {
-        int count4 = width >> 2;
-        uint8_t *dst = s->temp[0];
-        OPEN_READER(re, &s->gb);
-
-        if (count4 >= (BITS_LEFT(re, &s->gb)) / (32 * 4)) {
-            for (i = 0; i < count4 && BITS_LEFT(re, &s->gb) > 0; i++) {
-                READ_4PIX_PLANE(dst, 4*i, 0);
-            }
-        } else {
-            for (i = 0; i < count4; i++) {
-                READ_4PIX_PLANE(dst, 4*i, 0);
-            }
-        }
-        i *= 4;
-        for( ; i < width && BITS_LEFT(re, &s->gb)>0; i++ ) {
-            unsigned int index;
-            int nb_bits, code, n;
-            UPDATE_CACHE(re, &s->gb);
-            index = SHOW_UBITS(re,&s->gb, VLC_BITS);
-            VLC_INTERN(dst[i], s->vlc[0].table,
-                       &s->gb, re, VLC_BITS, 3);
-        }
-        CLOSE_READER(re, &s->gb);
+        decode_gray_bitstream(s, width);
     } else if (s->bps <= 14) {
         int count = width/2;
         OPEN_READER(re, &s->gb);
@@ -709,34 +710,6 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
             s->temp16[0][width-1] = dst + get_bits(&s->gb, 2);
         }
     }
-}
-
-static void decode_gray_bitstream(HYuvContext *s, int count)
-{
-    int i, count4 = count >> 2;
-    uint8_t *dst = s->temp[0];
-    OPEN_READER(re, &s->gb);
-
-    if (count4 >= (BITS_LEFT(re, &s->gb)) / (32 * 4)) {
-        for (i = 0; i < count4 && BITS_LEFT(re, &s->gb) > 0; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
-        }
-    } else {
-        for (i = 0; i < count4; i++) {
-            READ_4PIX_PLANE(dst, 4*i, 0);
-        }
-    }
-    i *= 4;
-    for( ; i < count && BITS_LEFT(re, &s->gb)>0; i++ ) {
-        unsigned int index;
-        int nb_bits, code, n;
-        UPDATE_CACHE(re, &s->gb);
-        index = SHOW_UBITS(re,&s->gb, VLC_BITS);
-        VLC_INTERN(dst[i], s->vlc[0].table,
-                   &s->gb, re, VLC_BITS, 3);
-    }
-
-    CLOSE_READER(re, &s->gb);
 }
 
 static av_always_inline void decode_bgr_1(HYuvContext *s, int count,
