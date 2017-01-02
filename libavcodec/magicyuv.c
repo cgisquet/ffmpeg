@@ -347,14 +347,20 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     for (i = 0; i < 1<<VLC_BITS; i++) {
         if (s->vlc[8+p].table[i][1] > 0) {
             s->mem[p][i].len  = s->vlc[8+p].table[i][1];
-            s->mem[p][i].type = 1;
+            s->mem[p][i].type = 2;
             s->mem[p][i].code.for4 = lut4[s->vlc[8+p].table[i][0]];
         } else if (s->vlc[4+p].table[i][1] > 0) {
             s->mem[p][i].len  = s->vlc[4+p].table[i][1];
-            s->mem[p][i].type = 0;
+            s->mem[p][i].type = 1;
             AV_WB16(&s->mem[p][i].code.for2, s->vlc[4+p].table[i][0]);
-        } else
-            s->mem[p][i].len = -1;
+        } else if (s->vlc[p].table[i][1] > 0) {
+            s->mem[p][i].len  = s->vlc[p].table[i][1];
+            s->mem[p][i].code.for2 = s->vlc[p].table[i][0];
+            s->mem[p][i].type = 0;
+        } else {
+            s->mem[p][i].len = s->vlc[p].table[i][1];
+            s->mem[p][i].code.for2 = s->vlc[p].table[i][0];
+        }
     }
 
     av_free(lut4);
@@ -363,7 +369,7 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
         // Add 8 wide entries for it
         for (i = (val-1)<<(VLC_BITS-8); i < val<<(VLC_BITS-8); i++) {
             s->mem[p][i].len = 8;
-            s->mem[p][i].type = 2;
+            s->mem[p][i].type = 3;
         }
     }
 
@@ -401,34 +407,58 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
                  s->vlc[plane].table, s->vlc[plane].table, \
                  VLC_BITS, 3, OP)
 
-#define GET_VLC_ITER(dst, off, name, gb, JTable, table, bits, max_depth)  \
+#define GET_VLC_ITER(dst, off, name, gb, JTable, bits, max_depth)   \
     do {                                                            \
         unsigned int index = SHOW_UBITS(name, gb, bits);            \
         int          code, n = JTable[index].len;                   \
                                                                     \
         if (n>0) {                                                  \
-            if (JTable[index].type == 2) {                          \
+            switch (JTable[index].type) {                           \
+            case 3:                                                 \
                 AV_ZERO64(dst+off);                                 \
                 off += 8;                                           \
                 SKIP_BITS(name, gb, 8);                             \
-            } else if (JTable[index].type) {                        \
+                break;                                              \
+            case 2:                                                 \
                 AV_WN32(dst+off, JTable[index].code.for4);          \
                 off += 4;                                           \
                 SKIP_BITS(name, gb, n);                             \
-            } else {                                                \
+                break;                                              \
+            case 1:                                                 \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
                 SKIP_BITS(name, gb, n);                             \
+                break;                                              \
+            default:                                                \
+                dst[off] = JTable[index].code.for2;                 \
+                off++;                                              \
+                SKIP_BITS(name, gb, n);                             \
+                break;                                              \
             }                                                       \
         } else {                                                    \
             int nb_bits;                                            \
-            VLC_INTERN(dst[off], table, gb, name, bits, max_depth); \
+            SKIP_BITS(name, gb, bits);                              \
+                                                                    \
+            nb_bits = -n;                                           \
+            index   = SHOW_UBITS(name, gb, nb_bits) + JTable[index].code.for2; \
+            code    = JTable[index].code.for2;                      \
+            n       = JTable[index].len;                            \
+            if (max_depth > 2 && n < 0) {                           \
+                SKIP_BITS(name, gb, nb_bits);                       \
+                                                                    \
+                nb_bits = -n;                                       \
+                index   = SHOW_UBITS(name, gb, nb_bits) + code;     \
+                code    = JTable[index].code.for2;                  \
+                n       = JTable[index].len;                        \
+            }                                                       \
+            SKIP_BITS(name, gb, n);                                 \
+            dst[off] = code;                                        \
             off++;                                                  \
         }                                                           \
     } while (0)
 
 #define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_ITER(dst, off, re, &gb, s->mem[plane], s->vlc[plane].table, VLC_BITS, 3)
+    GET_VLC_ITER(dst, off, re, &gb, s->mem[plane], VLC_BITS, 3)
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -636,6 +666,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
             CLOSE_READER(re, &gb);
+            //fprintf(stdout, "plane %d: %2.1f pixels/read\n", i, (width-8)*height*1.0f/reads);
         }
 
         switch (pred) {
