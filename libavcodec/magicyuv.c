@@ -503,25 +503,24 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
+            x = 0;
             for (k = 0; k < height; k++) {
                 if (width >= bitstream_bits_left(&bc) / 32) {
-                    for (x = 0; x < width-8 && bitstream_bits_left(&bc) > 0;) {
+                    for (; x < width && bitstream_bits_left(&bc) > 0;) {
                         READ_4PIX_PLANE(dst, x, i);
                     }
                 } else {
-                    for (x = 0; x < width-8;) {
+                    for (; x < width;) {
                         READ_4PIX_PLANE(dst, x, i);
                     }
                 }
 
-                for( ; x < width && bitstream_bits_left(&bc)>0; x++ ) {
-                    unsigned int index;
-                    int nb_bits, code, n;
-                    index = bitstream_peek(&bc, VLC_BITS);
-                    VLC_INTERN(dst[x], s->vlc[i].table,
-                               &bc, VLC_BITS, 3);
+                if (k < height-1) {
+                    uint64_t rem = AV_RN64(dst+width);
+                    dst += stride;
+                    AV_WN64(dst, rem);
+                    x -= width;
                 }
-                dst += stride;
             }
             //fprintf(stdout, "plane %d: %2.1f pixels/read\n", i, (width-8)*height*1.0f/reads);
         }
