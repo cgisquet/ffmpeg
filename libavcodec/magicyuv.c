@@ -79,7 +79,7 @@ typedef struct MagicYUVContext {
     Slice            *slices[4];      // slice bitstream positions for each plane
     unsigned int      slices_size[4]; // slice sizes for each plane
     uint8_t           len[4][1024];   // table of code lengths for each plane
-    VLC               vlc[12];        // VLC for each plane
+    VLC               vlc[8];         // VLC for each plane
     JointTable       *mem[4];
     int (*huff_build)(struct MagicYUVContext *s, int plane, int mask);
     int (*magy_decode_slice)(AVCodecContext *avctx, void *tdata,
@@ -150,6 +150,7 @@ static int huff_build10(MagicYUVContext *s, int p, int mask)
 static int huff_build(MagicYUVContext *s, int p, int mask)
 {
     VLC *vlc = s->vlc+p;
+    VLC vlc4, vlc2;
     uint8_t *len = (uint8_t *)(s->len+p);
     HuffEntry he[256];
     uint32_t codes[256];
@@ -161,6 +162,8 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     uint32_t *lut4;
     int i;
     int val = 0;
+    vlc2.table = NULL;
+    vlc4.table = NULL;
 
     if (!jsym)
         return AVERROR(ENOMEM);
@@ -200,36 +203,34 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     }
 
     // generate 2-joint table
-    vlc += 4;
-    if (ff_huff_joint_gen(vlc, jsym, mask, VLC_BITS,
+    if (ff_huff_joint_gen(&vlc2, jsym, mask, VLC_BITS,
                           codes, codes, bits, bits, lut, lut)) {
         goto err;
     }
 
     // 4-joint table
-    vlc += 4;
-    lut4 = ff_huff_joint4same_gen(vlc, jsym, mask, VLC_BITS,
+    lut4 = ff_huff_joint4same_gen(&vlc4, jsym, mask, VLC_BITS,
                                   codes, bits, lut);
     if (!lut4) {
         goto err;
     }
 
     for (i = 0; i < 1<<VLC_BITS; i++) {
-        if (s->vlc[8+p].table[i][1] > 0) {
-            s->mem[p][i].len  = s->vlc[8+p].table[i][1];
+        if (vlc4.table[i][1] > 0) {
+            s->mem[p][i].len  = vlc4.table[i][1];
             s->mem[p][i].type = 2;
-            s->mem[p][i].code.for4 = lut4[s->vlc[8+p].table[i][0]];
-        } else if (s->vlc[4+p].table[i][1] > 0) {
-            s->mem[p][i].len  = s->vlc[4+p].table[i][1];
+            s->mem[p][i].code.for4 = lut4[vlc4.table[i][0]];
+        } else if (vlc2.table[i][1] > 0) {
+            s->mem[p][i].len  = vlc2.table[i][1];
             s->mem[p][i].type = 1;
-            AV_WB16(&s->mem[p][i].code.for2, s->vlc[4+p].table[i][0]);
-        } else if (s->vlc[p].table[i][1] > 0) {
-            s->mem[p][i].len  = s->vlc[p].table[i][1];
-            s->mem[p][i].code.for2 = s->vlc[p].table[i][0];
+            AV_WB16(&s->mem[p][i].code.for2, vlc2.table[i][0]);
+        } else if (vlc->table[i][1] > 0) {
+            s->mem[p][i].len  = vlc->table[i][1];
+            s->mem[p][i].code.for2 = vlc->table[i][0];
             s->mem[p][i].type = 0;
         } else {
-            s->mem[p][i].len = s->vlc[p].table[i][1];
-            s->mem[p][i].code.for2 = s->vlc[p].table[i][0];
+            s->mem[p][i].len = vlc->table[i][1];
+            s->mem[p][i].code.for2 = vlc->table[i][0];
         }
     }
 
@@ -247,6 +248,8 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
 
 err:
     av_freep(&jsym);
+    ff_free_vlc(&vlc2);
+    ff_free_vlc(&vlc4);
     return AVERROR_INVALIDDATA;
 }
 
@@ -870,7 +873,7 @@ static int magy_init_thread_copy(AVCodecContext *avctx)
         s->slices_size[i] = 0;
     }
 
-    for (i = 0; i < 12; i++)
+    for (i = 0; i < 8; i++)
         s->vlc[i].table = NULL;
 
     return 0;
@@ -893,7 +896,7 @@ static av_cold int magy_decode_end(AVCodecContext *avctx)
         av_freep(&s->slices[i]);
         s->slices_size[i] = 0;
     }
-    for (i = 0; i < 12; i++)
+    for (i = 0; i < 8; i++)
         ff_free_vlc(&s->vlc[i]);
     for (i = 0; i < 4; i++)
         av_freep(&s->mem[i]);
