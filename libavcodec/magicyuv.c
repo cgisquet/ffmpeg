@@ -273,7 +273,7 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
 #define GET_VLC_ITER(dst, off, bc, JTable, bits, max_depth)         \
     do {                                                            \
         unsigned int index = bitstream_peek(bc, bits);              \
-        int          code, n = JTable[index].len;                   \
+        int          n = JTable[index].len;                         \
                                                                     \
         if (n>0) {                                                  \
             switch (JTable[index].type) {                           \
@@ -299,29 +299,16 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
                 break;                                              \
             }                                                       \
         } else {                                                    \
-            int nb_bits;                                            \
             bitstream_skip(bc, bits);                               \
                                                                     \
-            nb_bits = -n;                                           \
-            index   = bitstream_peek(bc, nb_bits) + JTable[index].code.for2;    \
-            code    = JTable[index].code.for2;                      \
-            n       = JTable[index].len;                            \
-            if (max_depth > 2 && n < 0) {                           \
-                bitstream_skip(bc, nb_bits);                        \
-                                                                    \
-                nb_bits = -n;                                       \
-                index   = bitstream_peek(bc, nb_bits) + code;       \
-                code    = JTable[index].code.for2;                  \
-                n       = JTable[index].len;                        \
-            }                                                       \
-            bitstream_skip(bc, n);                                  \
-            dst[off] = code;                                        \
+            index   = bitstream_read(bc, -n) + JTable[index].code.for2;    \
+            dst[off] = JTable[index].code.for2;                     \
             off++;                                                  \
         }                                                           \
     } while (0)
 
-#define READ_4PIX_PLANE(dst, off, plane) \
-    GET_VLC_ITER(dst, off, &bc, s->mem[plane], VLC_BITS, 3)
+#define READ_4PIX_PLANE(dst, off, jt) \
+    GET_VLC_ITER(dst, off, &bc, jt, VLC_BITS, 3)
 
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
@@ -497,15 +484,16 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
-            x = 0;
+            int z = 0;
+            const JointTable* jt = s->mem[i];
             for (k = 0; k < height; k++) {
-                if (width >= bitstream_bits_left(&bc) / 32) {
-                    for (; x < width && bitstream_bits_left(&bc) > 0;) {
-                        READ_4PIX_PLANE(dst, x, i);
+                if (width-z >= bitstream_bits_left(&bc) / 32) {
+                    for (; z < width && bitstream_bits_left(&bc) > 0;) {
+                        READ_4PIX_PLANE(dst, z, jt);
                     }
                 } else {
-                    for (; x < width;) {
-                        READ_4PIX_PLANE(dst, x, i);
+                    for (; z < width;) {
+                        READ_4PIX_PLANE(dst, z, jt);
                     }
                 }
 
@@ -513,7 +501,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                     uint64_t rem = AV_RN64(dst+width);
                     dst += stride;
                     AV_WN64(dst, rem);
-                    x -= width;
+                    z -= width;
                 }
             }
             //fprintf(stdout, "plane %d: %2.1f pixels/read\n", i, (width-8)*height*1.0f/reads);
