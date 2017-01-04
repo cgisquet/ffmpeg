@@ -72,6 +72,7 @@ typedef struct MagicYUVContext {
     uint8_t           len[4][1024];   // table of code lengths for each plane
     VLC               vlc[8];         // VLC for each plane
     JointTable       *mem[4];
+    int               fast[4];
     int (*huff_build)(struct MagicYUVContext *s, int plane, int mask);
     int (*magy_decode_slice)(AVCodecContext *avctx, void *tdata,
                              int j, int threadnr);
@@ -150,9 +151,9 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     uint16_t lut[256];
     uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
-    uint32_t *lut4;
+    uint32_t *lut4 = NULL;
     int i;
-    int val = 0;
+    int val = 0, total = 0;
     vlc2.table = NULL;
     vlc4.table = NULL;
 
@@ -169,8 +170,12 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
         he[i].len = len[i];
         if (len[i] == 0)
             return AVERROR_INVALIDDATA;
+        if (len[i] < 4)
+            total++;
     }
     AV_QSORT(he, 256, HuffEntry, huff_cmp_len);
+
+    s->fast[p] = total>2?1:0;
 
     code = 1;
     for (i = 255; i >= 0; i--) {
@@ -200,14 +205,16 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
     }
 
     // 4-joint table
+    if (total) {
     lut4 = ff_huff_joint4same_gen(&vlc4, jsym, mask, VLC_BITS,
                                   codes, codes, bits, bits, lut, lut);
     if (!lut4) {
         goto err;
     }
+    }
 
     for (i = 0; i < 1<<VLC_BITS; i++) {
-        if (vlc4.table[i][1] > 0) {
+        if (s->fast[p] && vlc4.table[i][1] > 0) {
             s->mem[p][i].len  = vlc4.table[i][1];
             s->mem[p][i].type = 2;
             s->mem[p][i].code.for4 = lut4[vlc4.table[i][0]];
@@ -225,9 +232,9 @@ static int huff_build(MagicYUVContext *s, int p, int mask)
         }
     }
 
-    av_free(lut4);
+    if (s->fast[p]) av_free(lut4);
 
-    if (val) {
+    if (val && s->fast[p]) {
         // Add 8 wide entries for it
         for (i = (val-1)<<(VLC_BITS-8); i < val<<(VLC_BITS-8); i++) {
             s->mem[p][i].len = 8;
@@ -269,6 +276,33 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
     GET_VLC_DUAL(dst0, dst1, &bc, s->vlc[4+plane].table, \
                  s->vlc[plane].table, s->vlc[plane].table, \
                  VLC_BITS, 3, OP)
+
+#define GET_VLC_ITER2(dst, off, bc, JTable, bits, max_depth)        \
+    do {                                                            \
+        unsigned int index = bitstream_peek(bc, bits);              \
+        int          n = JTable[index].len;                         \
+                                                                    \
+        if (n>0) {                                                  \
+            if (JTable[index].type) {                               \
+                AV_WN16(dst+off, JTable[index].code.for2);          \
+                off += 2;                                           \
+                bitstream_skip(bc, n);                              \
+            } else {                                                \
+                dst[off] = JTable[index].code.for2;                 \
+                off++;                                              \
+                bitstream_skip(bc, n);                              \
+            }                                                       \
+        } else {                                                    \
+            bitstream_skip(bc, bits);                               \
+                                                                    \
+            index   = bitstream_read(bc, -n) + JTable[index].code.for2;    \
+            dst[off] = JTable[index].code.for2;                      \
+            off++;                                                  \
+        }                                                           \
+    } while (0)
+
+#define READ_2PIX_PLANE8(dst, off, jt) \
+    GET_VLC_ITER2(dst, off, &bc, jt, VLC_BITS, 3)
 
 #define GET_VLC_ITER(dst, off, bc, JTable, bits, max_depth)         \
     do {                                                            \
@@ -486,6 +520,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
         } else {
             int z = 0;
             const JointTable* jt = s->mem[i];
+            if (s->fast[i]) {
             for (k = 0; k < height; k++) {
                 if (width-z >= bitstream_bits_left(&bc) / 32) {
                     for (; z < width && bitstream_bits_left(&bc) > 0;) {
@@ -503,6 +538,26 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                     AV_WN64(dst, rem);
                     z -= width;
                 }
+            }
+            } else {
+            for (k = 0; k < height; k++) {
+                if (width-z >= bitstream_bits_left(&bc) / 32) {
+                    for (; z < width && bitstream_bits_left(&bc) > 0;) {
+                        READ_2PIX_PLANE8(dst, z, jt);
+                    }
+                } else {
+                    for (; z < width;) {
+                        READ_2PIX_PLANE8(dst, z, jt);
+                    }
+                }
+
+                if (k < height-1) {
+                    uint32_t rem = AV_RN32(dst+width);
+                    dst += stride;
+                    AV_WN32(dst, rem);
+                    z -= width;
+                }
+            }
             }
             //fprintf(stdout, "plane %d: %2.1f pixels/read\n", i, (width-8)*height*1.0f/reads);
         }
