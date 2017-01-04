@@ -131,29 +131,47 @@ static int generate_joint_tables(HYuvContext *s)
                 goto out;
 
             if (s->version > 2 || s->bitstream_bpp == 12) {
-                int i;
-                s->lut4[p] = ff_huff_joint4same_gen(&s->vlc[8 + p], symbols,
-                                                    s->vlc_n, VLC_BITS,
-                                                    s->bits[p0], s->bits[p],
-                                                    s->len[p0], s->len[p], NULL, NULL);
-                if (!s->lut4[p])
-                    goto out;
-                av_freep(&s->mem[p]);
-                s->mem[p] = av_malloc((1<<VLC_BITS)*sizeof(JointTable));
-                if (!s->mem[p])
-                    goto out;
+                int i, total = 0;
+                uint32_t *lut = NULL;
+
+                for (i = 0; i < s->vlc_n; i++) {
+                    if (s->len[p][i] < 3) total++;
+                }
+
+                s->fast[p] = total > 2 ? 1 : 0;
+
+                if (s->fast[p]) {
+                    lut = ff_huff_joint4same_gen(&s->vlc[8 + p], symbols,
+                                                 s->vlc_n, VLC_BITS,
+                                                 s->bits[p0], s->bits[p],
+                                                 s->len[p0], s->len[p], NULL, NULL);
+                    if (!lut)
+                        goto out;
+                }
+                if (!s->mem[p]) {
+                    s->mem[p] = av_malloc((1<<VLC_BITS)*sizeof(JointTable));
+                    if (!s->mem[p]) {
+                        av_free(lut);
+                        goto out;
+                    }
+                }
                 for (i = 0; i < 1<<VLC_BITS; i++) {
-                    if (s->vlc[8+p].table[i][1] > 0) {
+                    if (s->fast[p] && s->vlc[8+p].table[i][1] > 0) {
                         s->mem[p][i].len  = s->vlc[8+p].table[i][1];
-                        s->mem[p][i].type = 1;
-                        s->mem[p][i].code.for4 = s->lut4[p][s->vlc[8+p].table[i][0]];
+                        s->mem[p][i].type = 2;
+                        s->mem[p][i].code.for4 = lut[s->vlc[8+p].table[i][0]];
                     } else if (s->vlc[4+p].table[i][1] > 0) {
                         s->mem[p][i].len  = s->vlc[4+p].table[i][1];
-                        s->mem[p][i].type = 0;
+                        s->mem[p][i].type = 1;
                         AV_WB16(&s->mem[p][i].code.for2, s->vlc[4+p].table[i][0]);
+                    } else if (s->vlc[p].table[i][1] > 0) {
+                        s->mem[p][i].len  = s->vlc[p].table[i][1];
+                        s->mem[p][i].type = 0;
+                        s->mem[p][i].code.for2 = s->vlc[p].table[i][0];
                     } else
                         s->mem[p][i].len = -1;
                 }
+                av_free(lut);
             }
         }
     } else {
@@ -291,7 +309,6 @@ static av_cold int decode_end(AVCodecContext *avctx)
         ff_free_vlc(&s->vlc[i]);
 
     for (i = 0; i < 4; i++) {
-        av_freep(&s->lut4[i]);
         av_freep(&s->mem[i]);
     }
 
@@ -600,7 +617,6 @@ static av_cold int decode_init_thread_copy(AVCodecContext *avctx)
         s->vlc[i].table = NULL;
 
     for (i = 0; i < 4; i++) {
-        s->lut4[i] = NULL;
         s->mem[i] = NULL;
     }
 
@@ -658,13 +674,20 @@ static void decode_422_bitstream(HYuvContext *s, int count)
             VLC_INTERN(dst[off], table, bc, bits, max_depth);       \
             off++;                                                  \
         } else {                                                    \
-            if (JTable[index].type) {                               \
+            switch(JTable[index].type) {                            \
+            case 2:                                                 \
                 AV_WN32(dst+off, JTable[index].code.for4);          \
                 off += 4;                                           \
                 bitstream_skip(bc, n);                              \
-            } else {                                                \
+                break;                                              \
+            case 1:                                                 \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
+                bitstream_skip(bc, n);                              \
+                break;                                              \
+            case 0:                                                 \
+                dst[off] = JTable[index].code.for2;                 \
+                off++;                                              \
                 bitstream_skip(bc, n);                              \
             }                                                       \
         }                                                           \
@@ -673,18 +696,53 @@ static void decode_422_bitstream(HYuvContext *s, int count)
 #define READ_4PIX_PLANE(dst, off, plane) \
     GET_VLC_ITER(dst, off, &s->bc, s->mem[plane], s->vlc[plane].table, VLC_BITS, 3)
 
+#define GET_VLC_ITER2(dst, off, bc, JTable, table, bits, max_depth)  \
+    do {                                                            \
+        unsigned int index = bitstream_peek(bc, bits);              \
+        int          code, n = JTable[index].len;                   \
+                                                                    \
+        if (n<=0) {                                                 \
+            int nb_bits;                                            \
+            VLC_INTERN(dst[off], table, bc, bits, max_depth);       \
+            off++;                                                  \
+        } else {                                                    \
+            if (JTable[index].type) {                               \
+                AV_WN16(dst+off, JTable[index].code.for2);          \
+                off += 2;                                           \
+                bitstream_skip(bc, n);                              \
+            } else {                                                \
+                dst[off] = JTable[index].code.for2;                 \
+                off++;                                              \
+                bitstream_skip(bc, n);                              \
+            }                                                       \
+        }                                                           \
+    } while (0)
+
+#define READ_2PIX_PLANE8(dst, off, plane) \
+    GET_VLC_ITER2(dst, off, &s->bc, s->mem[plane], s->vlc[plane].table, VLC_BITS, 3)
+
 static void decode_gray_bitstream(HYuvContext *s, int count)
 {
     int i;
     uint8_t *dst = s->temp[0];
 
     if (count >= bitstream_bits_left(&s->bc) / 32) {
+        if (s->fast[0]) {
         for (i = 0; i < count-4 && bitstream_bits_left(&s->bc) > 0;) {
             READ_4PIX_PLANE(dst, i, 0);
         }
-    } else {
+        } else {
+        for (i = 0; i < count-2 && bitstream_bits_left(&s->bc) > 0;) {
+            READ_2PIX_PLANE8(dst, i, 0);
+        }
+        }
+    } else if (s->fast[0]) {
         for (i = 0; i < count-4;) {
             READ_4PIX_PLANE(dst, i, 0);
+        }
+    } else {
+        for (i = 0; i < count-2;) {
+            READ_2PIX_PLANE8(dst, i, 0);
         }
     }
 
