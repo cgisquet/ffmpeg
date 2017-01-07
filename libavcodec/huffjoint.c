@@ -67,60 +67,6 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                               bits, 2, 2, symbols, 2, 2, 0);
 }
 
-
-int ff_huff_joint4_gen(VLC *vlc, void *array, int num, int numbits,
-                       const uint32_t* bits0, const uint32_t* bits1,
-                       const uint8_t* l0, const uint8_t* l1,
-                       const uint16_t* lut0, const uint16_t* lut1)
-{
-    uint16_t *jsym  = array;
-    uint16_t *jbits = jsym + (1 << numbits);
-    uint8_t  *jlen  = (uint8_t *)(jbits + (1 << numbits));
-    int i, t0;
-
-    num = FFMIN(8, num);
-    for (i = t0 = 0; t0 < num; t0++) {
-        int t1, idx0 = lut0 ? lut0[t0] : t0;
-        int len0  = l0[idx0];
-        int limit0 = numbits - len0;
-        if (limit0 < 3 || !len0)
-            break;
-        for (t1 = 0; t1 < num; t1++) {
-            int t2, idx1 = lut1 ? lut1[t1] : t1;
-            int len1 = l1[idx1];
-            int limit1 = limit0 - len1;
-            if (limit1 < 2 || !len1)
-                break;
-
-            for (t2 = 0; t2 < num; t2++) {
-                int t3, idx2 = lut0 ? lut0[t2] : t2;
-                int len2 = l0[idx2];
-                int limit2 = limit1 - len2;
-                if (limit2 < 1 || !len2)
-                    break;
-
-                for (t3 = 0; t3 < num; t3++) {
-                    int code, idx3 = lut1 ? lut1[t3] : t3;
-                    int len3 = l1[idx3];
-                    if (limit2 < len3 || !len3)
-                        break;
-                    av_assert0(i < (1 << numbits));
-                    code = (bits0[idx0] << len1) | bits1[idx1];
-                    code = (code << len2) | bits0[idx2];
-                    jbits[i] = (code << len3) | bits1[idx3];
-                    jlen[i] = len0 + len1 + len2 + len3;
-                    jsym[i]  = (t0<<12)|(t1<<8)|(t2<<4)|(t3&15);
-                    i++;
-                }
-            }
-        }
-    }
-    //printf("%i 4-VLCs\n", i);
-    ff_free_vlc(vlc);
-    return ff_init_vlc_sparse(vlc, numbits, i, jlen, 1, 1,
-                              jbits, 2, 2, jsym, 2, 2, 0);
-}
-
 uint32_t *ff_huff_joint4same_gen(VLC *vlc, void *array, int num, int numbits,
                                  const uint32_t* bits0, const uint32_t* bits1,
                                  const uint8_t* l0, const uint8_t* l1,
