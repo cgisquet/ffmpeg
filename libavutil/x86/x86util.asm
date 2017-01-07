@@ -891,9 +891,13 @@
     %endif
 %endmacro
 
-%macro LSHIFT 2
+%macro LSHIFT 2-3
 %if mmsize > 8
+%if %0 == 3
+    pslldq  %1, %2, %3
+%else
     pslldq  %1, %2
+%endif
 %else
     psllq   %1, 8*(%2)
 %endif
@@ -901,7 +905,11 @@
 
 %macro RSHIFT 2
 %if mmsize > 8
+%if %0 == 3
+    psrldq  %1, %2, %3
+%else
     psrldq  %1, %2
+%endif
 %else
     psrlq   %1, 8*(%2)
 %endif
