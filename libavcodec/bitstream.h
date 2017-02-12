@@ -35,40 +35,79 @@
 #include "mathops.h"
 #include "vlc.h"
 
+#ifndef BITSTREAM_BITS
+# if HAVE_FAST_64BIT || defined(LONG_BITSTREAM_READER)
+#   define BITSTREAM_BITS   64
+# else
+#   define BITSTREAM_BITS   32
+# endif
+#endif
+
+#if BITSTREAM_BITS == 64
+# define BITSTREAM_HBITS  32
+typedef uint64_t cache_type;
+# ifdef BITSTREAM_READER_LE
+#   define AV_RALL  AV_RL64
+#   define AV_RHALF AV_RL32
+# else
+#   define AV_RALL  AV_RB64
+#   define AV_RHALF AV_RB32
+# endif
+#else
+# define BITSTREAM_HBITS  16
+typedef uint32_t cache_type;
+# ifdef BITSTREAM_READER_LE
+#   define AV_RALL  AV_RL32
+#   define AV_RHALF AV_RL16
+# else
+#   define AV_RALL  AV_RB32
+#   define AV_RHALF AV_RB16
+# endif
+#endif
+
 typedef struct BitstreamContext {
-    uint64_t bits;      // stores bits read from the buffer
+    cache_type bits;    // stores bits read from the buffer
     const uint8_t *buffer, *buffer_end;
     const uint8_t *ptr; // position inside a buffer
     unsigned bits_left; // number of bits left in bits field
     unsigned size_in_bits;
 } BitstreamContext;
 
-static inline void refill_64(BitstreamContext *bc)
+static inline void refill_all(BitstreamContext *bc)
 {
     if (bc->ptr >= bc->buffer_end)
         return;
 
-#ifdef BITSTREAM_READER_LE
-    bc->bits       = AV_RL64(bc->ptr);
-#else
-    bc->bits       = AV_RB64(bc->ptr);
-#endif
-    bc->ptr       += 8;
-    bc->bits_left  = 64;
+    bc->bits       = AV_RALL(bc->ptr);
+    bc->ptr       += BITSTREAM_BITS/8;
+    bc->bits_left  = BITSTREAM_BITS;
 }
 
-static inline void refill_32(BitstreamContext *bc)
+static inline void refill_half(BitstreamContext *bc)
 {
     if (bc->ptr >= bc->buffer_end)
         return;
 
-#ifdef BITSTREAM_READER_LE
-    bc->bits       = (uint64_t)AV_RL32(bc->ptr) << bc->bits_left | bc->bits;
-#else
-    bc->bits       = bc->bits | (uint64_t)AV_RB32(bc->ptr) << (32 - bc->bits_left);
+#if BITSTREAM_BITS == 32
+    if (bc->bits_left > 16) {
+# ifdef BITSTREAM_READER_LE
+        bc->bits |= (uint32_t)bc->ptr[0] << bc->bits_left;
+# else
+        bc->bits |= (uint32_t)bc->ptr[0] << (32 - bc->bits_left);
+# endif
+        bc->ptr++;
+        bc->bits_left += 8;
+        return;
+    }
 #endif
-    bc->ptr       += 4;
-    bc->bits_left += 32;
+
+#ifdef BITSTREAM_READER_LE
+    bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << bc->bits_left;
+#else
+    bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << (BITSTREAM_HBITS - bc->bits_left);
+#endif
+    bc->ptr       += BITSTREAM_HBITS/8;
+    bc->bits_left += BITSTREAM_HBITS;
 }
 
 /* Initialize BitstreamContext. Input buffer must have an additional zero
@@ -95,7 +134,7 @@ static inline int bitstream_init(BitstreamContext *bc, const uint8_t *buffer,
     bc->bits_left    = 0;
     bc->bits         = 0;
 
-    refill_64(bc);
+    refill_all(bc);
 
     return 0;
 }
@@ -127,13 +166,13 @@ static inline int bitstream_bits_left(const BitstreamContext *bc)
     return (bc->buffer - bc->ptr) * 8 + bc->size_in_bits + bc->bits_left;
 }
 
-static inline uint64_t get_val(BitstreamContext *bc, unsigned n)
+static inline cache_type get_val(BitstreamContext *bc, unsigned n)
 {
 #ifdef BITSTREAM_READER_LE
-    uint64_t ret = bc->bits & ((UINT64_C(1) << n) - 1);
+    cache_type ret = bc->bits & ((UINT##BITSTREAM_BITS##_C(1) << n) - 1);
     bc->bits >>= n;
 #else
-    uint64_t ret = bc->bits >> (64 - n);
+    cache_type ret = bc->bits >> (BITSTREAM_BITS - n);
     bc->bits <<= n;
 #endif
     bc->bits_left -= n;
@@ -145,7 +184,7 @@ static inline uint64_t get_val(BitstreamContext *bc, unsigned n)
 static inline unsigned bitstream_read_bit(BitstreamContext *bc)
 {
     if (!bc->bits_left)
-        refill_64(bc);
+        refill_all(bc);
 
     return get_val(bc, 1);
 }
@@ -167,7 +206,7 @@ static inline uint64_t bitstream_read_63(BitstreamContext *bc, unsigned n)
         left = bc->bits_left;
 #endif
         ret = get_val(bc, bc->bits_left);
-        refill_64(bc);
+        refill_all(bc);
     }
 
 #ifdef BITSTREAM_READER_LE
@@ -186,8 +225,8 @@ static inline uint32_t bitstream_read(BitstreamContext *bc, unsigned n)
         return 0;
 
     if (n > bc->bits_left) {
-        refill_32(bc);
-        if (bc->bits_left < 32)
+        refill_half(bc);
+        if (bc->bits_left < BITSTREAM_HBITS)
             bc->bits_left = n;
     }
 
@@ -204,9 +243,9 @@ static inline int32_t bitstream_read_signed(BitstreamContext *bc, unsigned n)
 static inline unsigned show_val(const BitstreamContext *bc, unsigned n)
 {
 #ifdef BITSTREAM_READER_LE
-    return bc->bits & ((UINT64_C(1) << n) - 1);
+    return bc->bits & ((UINT##BITSTREAM_BITS##_C(1) << n) - 1);
 #else
-    return bc->bits >> (64 - n);
+    return bc->bits >> (BITSTREAM_BITS - n);
 #endif
 }
 
@@ -215,7 +254,7 @@ static inline unsigned show_val(const BitstreamContext *bc, unsigned n)
 static inline unsigned bitstream_peek(BitstreamContext *bc, unsigned n)
 {
     if (n > bc->bits_left)
-        refill_32(bc);
+        refill_half(bc);
 
     return show_val(bc, n);
 }
@@ -245,13 +284,13 @@ static inline void bitstream_skip(BitstreamContext *bc, unsigned n)
     else {
         n -= bc->bits_left;
         skip_remaining(bc, bc->bits_left);
-        if (n >= 64) {
+        if (n >= BITSTREAM_BITS) {
             unsigned skip = n / 8;
 
             n -= skip * 8;
             bc->ptr += skip;
         }
-        refill_64(bc);
+        refill_all(bc);
         if (n)
             skip_remaining(bc, n);
     }
@@ -395,7 +434,7 @@ static inline int bitstream_apply_sign(BitstreamContext *bc, int val)
     return (val ^ sign) - sign;
 }
 
-/* Unwind the cache so a refill_32 can fill it again. */
+/* Unwind the cache so a refill_half can fill it again. */
 static inline void bitstream_unwind(BitstreamContext *bc)
 {
     int unwind = 4;
