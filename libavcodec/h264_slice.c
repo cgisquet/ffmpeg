@@ -1013,10 +1013,10 @@ static int h264_init_ps(H264Context *h, const H264SliceContext *sl, int first_sl
         h->ps.pps = (const PPS*)h->ps.pps_ref->data;
     }
 
-    if (h->ps.sps != (const SPS*)h->ps.sps_list[h->ps.pps->sps_id]->data) {
+    if (h->ps.sps != h->ps.pps->sps) {
         av_buffer_unref(&h->ps.sps_ref);
         h->ps.sps = NULL;
-        h->ps.sps_ref = av_buffer_ref(h->ps.sps_list[h->ps.pps->sps_id]);
+        h->ps.sps_ref = av_buffer_ref(h->ps.pps->sps_buf);
         if (!h->ps.sps_ref)
             return AVERROR(ENOMEM);
         h->ps.sps = (const SPS*)h->ps.sps_ref->data;
@@ -1779,13 +1779,7 @@ static int h264_slice_header_parse(const H264Context *h, H264SliceContext *sl,
         return AVERROR_INVALIDDATA;
     }
     pps = (const PPS*)h->ps.pps_list[sl->pps_id]->data;
-
-    if (!h->ps.sps_list[pps->sps_id]) {
-        av_log(h->avctx, AV_LOG_ERROR,
-               "non-existing SPS %u referenced\n", pps->sps_id);
-        return AVERROR_INVALIDDATA;
-    }
-    sps = (const SPS*)h->ps.sps_list[pps->sps_id]->data;
+    sps = pps->sps;
 
     sl->frame_num = get_bits(&sl->gb, sps->log2_max_frame_num);
     if (!first_slice) {
@@ -2171,7 +2165,7 @@ int ff_h264_queue_decode_slice(H264Context *h, const H2645NAL *nal)
             av_log(h->avctx, AV_LOG_ERROR, "PPS changed between slices\n");
             return AVERROR_INVALIDDATA;
         }
-        if (h->ps.sps != (const SPS*)h->ps.sps_list[h->ps.pps->sps_id]->data) {
+        if (h->ps.sps != pps->sps) {
             av_log(h->avctx, AV_LOG_ERROR,
                "SPS changed in the middle of the frame\n");
             return AVERROR_INVALIDDATA;
