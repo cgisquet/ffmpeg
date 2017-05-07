@@ -280,8 +280,19 @@ static inline const uint8_t *bitstream_align(BitstreamContext *bc)
  * If MSB not set it is negative. */
 static inline int bitstream_read_xbits(BitstreamContext *bc, unsigned length)
 {
-    int32_t cache = bitstream_peek(bc, 32);
-    int sign = ~cache >> 31;
+    int sign;
+    int32_t cache;
+
+    if (length > bc->bits_left)
+        refill_half(bc);
+#if BITSTREAM_BITS == 32
+    cache = bc->bits;
+#elif defined(BITSTREAM_READER_LE)
+    cache = bc->bits & 0xFFFFFFFF;
+#else
+    cache = bc->bits >> 32;
+#endif
+    sign = ~cache >> 31;
     skip_remaining(bc, length);
 
     return ((((uint32_t)(sign ^ cache)) >> (32 - length)) ^ sign) - sign;
