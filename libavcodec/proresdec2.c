@@ -25,6 +25,7 @@
  */
 
 //#define DEBUG
+//#define LONG_BITSTREAM_READER
 
 #include "libavutil/internal.h"
 #include "avcodec.h"
@@ -248,27 +249,34 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
     return pic_data_size;
 }
 
+/* bitstream_read may fail on 32bits ARCHS for >24 bits, so use long version there */
+#if BITSTREAM_BITS == 32
+# define READ_BITS bitstream_read_63
+#else
+# define READ_BITS bitstream_read
+#endif
+
 #define DECODE_CODEWORD(val, codebook)                                  \
     do {                                                                \
         unsigned int rice_order, exp_order, switch_bits;                \
         unsigned int q, buf, bits;                                      \
                                                                         \
-        buf = bitstream_peek(gb, 32);                                \
+        buf = bitstream_peek(gb, 14);                                   \
                                                                         \
         /* number of bits to switch between rice and exp golomb */      \
         switch_bits =  codebook & 3;                                    \
         rice_order  =  codebook >> 5;                                   \
         exp_order   = (codebook >> 2) & 7;                              \
                                                                         \
-        q = 31 - av_log2(buf);                                          \
+        q = 13 - av_log2(buf);                                          \
                                                                         \
         if (q > switch_bits) { /* exp golomb */                         \
             bits = exp_order - switch_bits + (q<<1);                    \
-            val = bitstream_read(gb, bits) - (1 << exp_order) +      \
+            val = READ_BITS(gb, bits) - (1 << exp_order) +              \
                 ((switch_bits + 1) << rice_order);                      \
         } else if (rice_order) {                                        \
             bitstream_skip(gb, q+1);                                    \
-            val = (q << rice_order) + bitstream_read(gb, rice_order);\
+            val = (q << rice_order) + bitstream_read(gb, rice_order);   \
         } else {                                                        \
             val = q;                                                    \
             bitstream_skip(gb, q+1);                                    \
@@ -325,7 +333,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
 
     for (pos = block_mask;;) {
         bits_left = bitstream_bits_left(gb);
-        if (!bits_left || (bits_left < 32 && !bitstream_peek(gb, bits_left)))
+        if (!bits_left || (bits_left < 16 && !bitstream_peek(gb, bits_left)))
             break;
 
         DECODE_CODEWORD(run, run_to_cb[FFMIN(run,  15)]);
