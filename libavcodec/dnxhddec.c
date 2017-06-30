@@ -403,9 +403,7 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
         }
 
         if (++i > 63) {
-            av_log(ctx->avctx, AV_LOG_ERROR, "ac tex damaged %d, %d\n", n, i);
-            ret = -1;
-            break;
+            return -i;
         }
 
         j     = ctx->scantable.permutated[i];
@@ -496,8 +494,11 @@ static int dnxhd_decode_macroblock(const DNXHDContext *ctx, RowContext *row,
     }
 
     for (i = 0; i < 8 + 4 * ctx->is_444; i++) {
-        if (ctx->decode_dct_block(ctx, row, i) < 0)
+        int ret = ctx->decode_dct_block(ctx, row, i);
+        if (ret < 0) {
+            av_log(ctx->avctx, AV_LOG_ERROR, "ac tex damaged %d, %d\n", i, ret);
             return AVERROR_INVALIDDATA;
+        }
     }
 
     if (frame->interlaced_frame) {
