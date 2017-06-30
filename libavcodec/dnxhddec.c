@@ -73,7 +73,8 @@ typedef struct DNXHDContext {
                             RowContext *row, int n);
 } DNXHDContext;
 
-#define DNXHD_VLC_BITS 9
+#define DNXHD_VLC_BITS 10
+#define DNXHD_RUN_BITS 10
 #define DNXHD_DC_VLC_BITS 7
 
 static int dnxhd_decode_dct_block_8(const DNXHDContext *ctx,
@@ -132,7 +133,7 @@ static int dnxhd_init_vlc(DNXHDContext *ctx, uint32_t cid, int bitdepth)
         init_vlc(&ctx->dc_vlc, DNXHD_DC_VLC_BITS, bitdepth > 8 ? 14 : 12,
                  ctx->cid_table->dc_bits, 1, 1,
                  ctx->cid_table->dc_codes, 1, 1, 0);
-        init_vlc(&ctx->run_vlc, DNXHD_VLC_BITS, 62,
+        init_vlc(&ctx->run_vlc, DNXHD_RUN_BITS, 62,
                  ctx->cid_table->run_bits, 1, 1,
                  ctx->cid_table->run_codes, 2, 2, 0);
 
@@ -397,7 +398,7 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
 
         if (flags & 2) {
             index2 = bitstream_read_vlc(&row->gb, ctx->run_vlc.table,
-                                        DNXHD_VLC_BITS, 2);
+                                        DNXHD_RUN_BITS, 1);
             i += ctx->cid_table->run[index2];
         }
 
