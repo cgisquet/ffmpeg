@@ -389,7 +389,7 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
         level = ac_info[2*index1+0];
         flags = ac_info[2*index1+1];
 
-        sign = bitstream_read_signed(&row->gb, 1);
+        sign = -bitstream_read_bit(&row->gb);
 
         if (flags & 1) {
             level += bitstream_read(&row->gb, index_bits) << 7;
