@@ -24,12 +24,14 @@
  * Known FOURCCs: 'apch' (HQ), 'apcn' (SD), 'apcs' (LT), 'apco' (Proxy), 'ap4h' (4444), 'ap4x' (4444 XQ)
  */
 
+//#define DEBUG
 #define CACHED_BITSTREAM_READER 1
 
 #include "config_components.h"
 
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
+#include "libavutil/thread.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -129,8 +131,62 @@ static void unpack_alpha_12(GetBitContext *gb, uint16_t *dst, int num_coeffs,
     }
 }
 
+#define AC_BITS 12
+#define PRORES_LEV_BITS 9
+
+static const uint8_t ac_info[] = { 0x04, 0x0A, 0x05, 0x06, 0x28, 0x4C };
+static VLC ac_vlc[FF_ARRAY_ELEMS(ac_info)];
+static VLCElem vlc_buf[30896];
+
+static av_cold void init_vlcs(void)
+{
+    int offset = 0;
+    for (int i = 0; i < FF_ARRAY_ELEMS(ac_info); i++) {
+        uint32_t ac_codes[1<<AC_BITS];
+        uint8_t ac_bits[1<<AC_BITS];
+        unsigned int rice_order, exp_order, switch_bits, switch_val;
+        int ac, max_bits = 0, codebook = ac_info[i];
+
+        /* number of prefix bits to switch between Rice and expGolomb */
+        switch_bits = (codebook & 3);
+        rice_order  =  codebook >> 5;       /* rice code order */
+        exp_order   = (codebook >> 2) & 7;  /* exp golomb code order */
+
+        switch_val  = (switch_bits+1) << rice_order;
+
+        // Values are actually transformed, but this is more a wrapping
+        for (ac = 0; ac <1<<AC_BITS; ac++) {
+            int exponent, bits, val = ac;
+            unsigned int code;
+
+            if (val >= switch_val) {
+                val += (1 << exp_order) - switch_val;
+                exponent = av_log2(val);
+                bits = exponent+1+switch_bits-exp_order/*0*/ + exponent+1/*val*/;
+                code = val;
+            } else if (rice_order) {
+                bits = (val >> rice_order)/*0*/ + 1/*1*/ + rice_order/*val*/;
+                code = (1 << rice_order) | val;
+            } else {
+                bits = val/*0*/ + 1/*1*/;
+                code = 1;
+            }
+            if (bits > max_bits) max_bits = bits;
+            ac_bits [ac] = bits;
+            ac_codes[ac] = code;
+        }
+
+        ac_vlc[i].table = vlc_buf + offset;
+        ac_vlc[i].table_allocated = FF_ARRAY_ELEMS(vlc_buf) - offset;
+        init_vlc(ac_vlc+i, PRORES_LEV_BITS, 1<<AC_BITS, ac_bits, 1, 1,
+                 ac_codes, 4, 4, INIT_VLC_STATIC_OVERLONG);
+        offset += ac_vlc[i].table_size;
+    }
+}
+
 static av_cold int decode_init(AVCodecContext *avctx)
 {
+    static AVOnce init_static_once = AV_ONCE_INIT;
     int ret = 0;
     ProresContext *ctx = avctx->priv_data;
     uint8_t idct_permutation[64];
@@ -183,6 +239,9 @@ static av_cold int decode_init(AVCodecContext *avctx)
     ff_permute_scantable(ctx->interlaced_scan, ff_prores_interlaced_scan, idct_permutation);
 
     ctx->pix_fmt = AV_PIX_FMT_NONE;
+
+    // init dc_tables
+    ff_thread_once(&init_static_once, init_vlcs);
 
     if (avctx->bits_per_raw_sample == 10){
         ctx->unpack_alpha = unpack_alpha_10;
@@ -519,12 +578,6 @@ static const int8_t run_to_cb[][4] = {
     { 0, 2,  3, -4 }
 };
 
-static const int8_t lev_to_cb[][4] = {
-    { 0, 0,  1, -1 }, { 2, 0,  0, -1 }, { 1, 0, 0,  0 }, { 2, 0, -1,  1 }, { 0, 0, 1, -1 },
-    { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 },
-    { 0, 2,  3, -4 }
-};
-
 static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContext *gb,
                                              int16_t *out, int blocks_per_slice)
 {
@@ -541,8 +594,9 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
     block_mask = blocks_per_slice - 1;
 
     for (pos = block_mask;;) {
+        static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4, 5 };
+        const VLC* tbl = ac_vlc + ctx_to_tbl[FFMIN(level, FF_ARRAY_ELEMS(ctx_to_tbl) - 1)];
         unsigned int runcb = FFMIN(run,  FF_ARRAY_ELEMS(run_to_cb) - 1);
-        unsigned int levcb = FFMIN(level, FF_ARRAY_ELEMS(lev_to_cb) - 1);
         bits_rem = get_bits_left(gb);
         if (bits_rem <= 0 || (bits_rem < 16 && !show_bits(gb, bits_rem)))
             break;
@@ -555,8 +609,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
             return AVERROR_INVALIDDATA;
         }
 
-        DECODE_CODEWORD2(level, lev_to_cb[levcb][0], lev_to_cb[levcb][1],
-                                lev_to_cb[levcb][2], lev_to_cb[levcb][3]);
+        level = get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
         level += 1;
 
         i = pos >> log2_block_count;
