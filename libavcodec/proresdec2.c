@@ -24,11 +24,10 @@
  * Known FOURCCs: 'apch' (HQ), 'apcn' (SD), 'apcs' (LT), 'acpo' (Proxy), 'ap4h' (4444)
  */
 
-#define CACHED_BITSTREAM_READER 1
+//#define DEBUG
 
 #include "libavutil/internal.h"
 #include "avcodec.h"
-#include "get_bits.h"
 #include "idctdsp.h"
 #include "internal.h"
 #include "profiles.h"
@@ -130,11 +129,17 @@ static void unpack_alpha_12(GetBitContext *gb, uint16_t *dst, int num_coeffs,
     }
 }
 
+#define AC_BITS 12
+#define PRORES_LEV_BITS 9
+
+static const uint8_t ac_info[] = { 0x04, 0x0A, 0x05, 0x06, 0x28, 0x4C };
+
 static av_cold int decode_init(AVCodecContext *avctx)
 {
     int ret = 0;
     ProresContext *ctx = avctx->priv_data;
     uint8_t idct_permutation[64];
+    int i;
 
     avctx->bits_per_raw_sample = 10;
 
@@ -182,6 +187,52 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
     permute(ctx->progressive_scan, ff_prores_progressive_scan, idct_permutation);
     permute(ctx->interlaced_scan, ff_prores_interlaced_scan, idct_permutation);
+
+    // init dc_tables
+    for (i = 0; i < sizeof(ac_info); i++) {
+        uint32_t ac_codes[1<<AC_BITS];
+        uint8_t ac_bits[1<<AC_BITS];
+        unsigned int rice_order, exp_order, switch_bits, switch_val;
+        int ac, max_bits = 0, codebook = ac_info[i];
+
+        /* number of prefix bits to switch between Rice and expGolomb */
+        switch_bits = (codebook & 3);
+        rice_order  =  codebook >> 5;       /* rice code order */
+        exp_order   = (codebook >> 2) & 7;  /* exp golomb code order */
+
+        switch_val  = (switch_bits+1) << rice_order;
+
+        // Values are actually transformed, but this is more a wrapping
+        for (ac = 0; ac <1<<AC_BITS; ac++) {
+            int exponent, bits, val = ac;
+            unsigned int code;
+
+            if (val >= switch_val) {
+                val += (1 << exp_order) - switch_val;
+                exponent = av_log2(val);
+                bits = exponent+1+switch_bits-exp_order/*0*/ + exponent+1/*val*/;
+                code = val;
+            } else if (rice_order) {
+                bits = (val >> rice_order)/*0*/ + 1/*1*/ + rice_order/*val*/;
+                code = (1 << rice_order) | val;
+            } else {
+                bits = val/*0*/ + 1/*1*/;
+                code = 1;
+            }
+            if (bits > max_bits) max_bits = bits;
+            ac_bits [ac] = bits;
+            ac_codes[ac] = code;
+        }
+
+        ff_free_vlc(ctx->ac_vlc+i);
+
+        if (init_vlc(ctx->ac_vlc+i, PRORES_LEV_BITS, 1<<AC_BITS,
+                     ac_bits, 1, 1, ac_codes, 4, 4, 0) < 0) {
+            av_log(avctx, AV_LOG_ERROR, "Error for %d(0x%02X), max bits %d\n",
+                   i, codebook, max_bits);
+            return AVERROR_BUG;
+        }
+    }
 
     if (avctx->bits_per_raw_sample == 10){
         ctx->unpack_alpha = unpack_alpha_10;
@@ -491,17 +542,11 @@ static av_always_inline int decode_dc_coeffs(GetBitContext *gb, int16_t *out,
     return 0;
 }
 
-// adaptive codebook switching lut according to previous run/level values
+// adaptive codebook switching lut according to previous run values
 static const char run_to_cb[16][4] = {
     { 2, 0, -1,  1 }, { 2, 0, -1,  1 }, { 1, 0, 0,  0 }, { 1, 0,  0,  0 }, { 0, 0, 1, -1 },
     { 1, 1,  1,  0 }, { 1, 1,  1,  0 }, { 1, 1, 1,  0 }, { 1, 1,  1,  0 },
     { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
-    { 0, 2,  3, -4 }
-};
-
-static const char lev_to_cb[10][4] = {
-    { 0, 0,  1, -1 }, { 2, 0,  0, -1 }, { 1, 0, 0,  0 }, { 2, 0, -1,  1 }, { 0, 0, 1, -1 },
-    { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 },
     { 0, 2,  3, -4 }
 };
 
@@ -521,7 +566,8 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
     block_mask = blocks_per_slice - 1;
 
     for (pos = block_mask;;) {
-        const char* levcb = &lev_to_cb[FFMIN(level, 9)];
+        static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4, 5 };
+        const VLC* tbl = ctx->ac_vlc + ctx_to_tbl[FFMIN(level, 9)];
         const char* runcb = &run_to_cb[FFMIN(run,  15)];
         bits_left = get_bits_left(gb);
         if (!bits_left || (bits_left < 16 && !show_bits(gb, bits_left)))
@@ -534,7 +580,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
             return AVERROR_INVALIDDATA;
         }
 
-        DECODE_CODEWORD2(level, levcb[0], levcb[1], levcb[2], levcb[3]);
+        level = get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
         level += 1;
 
         i = pos >> log2_block_count;
@@ -855,6 +901,10 @@ static int decode_init_thread_copy(AVCodecContext *avctx)
 static av_cold int decode_close(AVCodecContext *avctx)
 {
     ProresContext *ctx = avctx->priv_data;
+    int i;
+
+    for (i = 0; i < sizeof(ac_info); i++)
+        ff_free_vlc(ctx->ac_vlc+i);
 
     av_freep(&ctx->slices);
 
