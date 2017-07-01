@@ -256,6 +256,7 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
 # define READ_BITS bitstream_read
 #endif
 
+/* Kept for reference and because clearer for first DC */
 #define DECODE_CODEWORD(val, codebook)                                  \
     do {                                                                \
         unsigned int rice_order, exp_order, switch_bits;                \
@@ -283,18 +284,41 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
         }                                                               \
     } while (0)
 
+/* number of bits to switch between rice and exp golomb */
+#define DECODE_CODEWORD2(val, switch_bits, rice_order, diff, offset)    \
+    do {                                                                \
+        unsigned int q, buf, bits;                                      \
+                                                                        \
+        buf = bitstream_peek(gb, 14);                                   \
+        q = 13 - av_log2(buf);                                          \
+                                                                        \
+        if (q > switch_bits) { /* exp golomb */                         \
+            bits = (q<<1) + (int)diff;                                  \
+            val = READ_BITS(gb, bits) + (int)offset;                    \
+        } else if (rice_order) {                                        \
+            bitstream_skip(gb, q+1);                                    \
+            val = (q << rice_order) + bitstream_read(gb, rice_order);   \
+        } else {                                                        \
+            val = q;                                                    \
+            bitstream_skip(gb, q+1);                                    \
+        }                                                               \
+    } while (0)
+
+
 #define TOSIGNED(x) (((x) >> 1) ^ (-((x) & 1)))
 
 #define FIRST_DC_CB 0xB8
 
-static const uint8_t dc_codebook[7] = { 0x04, 0x28, 0x28, 0x4D, 0x4D, 0x70, 0x70};
+static const char dc_codebook[7][4] = {
+    { 0, 0, 1, -1 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
+    { 1, 2, 2,  0 }, { 1, 2, 2,  0 }, { 0, 3, 4, -8 }, { 0, 3, 4, -8 }
+};
 
 static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out,
                                               int blocks_per_slice)
 {
     int16_t prev_dc;
     int code, i, sign;
-
     DECODE_CODEWORD(code, FIRST_DC_CB);
     prev_dc = TOSIGNED(code);
     out[0] = prev_dc;
@@ -304,7 +328,8 @@ static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out
     code = 5;
     sign = 0;
     for (i = 1; i < blocks_per_slice; i++, out += 64) {
-        DECODE_CODEWORD(code, dc_codebook[FFMIN(code, 6U)]);
+        const char *dccb = &dc_codebook[FFMIN(code, 6U)];
+        DECODE_CODEWORD2(code, dccb[0], dccb[1], dccb[2], dccb[3]);
         if(code) sign ^= -(code & 1);
         else     sign  = 0;
         prev_dc += (((code + 1) >> 1) ^ sign) - sign;
@@ -313,8 +338,18 @@ static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out
 }
 
 // adaptive codebook switching lut according to previous run/level values
-static const uint8_t run_to_cb[16] = { 0x06, 0x06, 0x05, 0x05, 0x04, 0x29, 0x29, 0x29, 0x29, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x4C };
-static const uint8_t lev_to_cb[10] = { 0x04, 0x0A, 0x05, 0x06, 0x04, 0x28, 0x28, 0x28, 0x28, 0x4C };
+static const char run_to_cb[16][4] = {
+    { 2, 0, -1,  1 }, { 2, 0, -1,  1 }, { 1, 0, 0,  0 }, { 1, 0,  0,  0 }, { 0, 0, 1, -1 },
+    { 1, 1,  1,  0 }, { 1, 1,  1,  0 }, { 1, 1, 1,  0 }, { 1, 1,  1,  0 },
+    { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
+    { 0, 2,  3, -4 }
+};
+
+static const char lev_to_cb[10][4] = {
+    { 0, 0,  1, -1 }, { 2, 0,  0, -1 }, { 1, 0, 0,  0 }, { 2, 0, -1,  1 }, { 0, 0, 1, -1 },
+    { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 },
+    { 0, 2,  3, -4 }
+};
 
 static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamContext *gb,
                                              int16_t *out, int blocks_per_slice)
@@ -332,18 +367,20 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
     block_mask = blocks_per_slice - 1;
 
     for (pos = block_mask;;) {
+        const char* levcb = &lev_to_cb[FFMIN(level, 9)];
+        const char* runcb = &run_to_cb[FFMIN(run,  15)];
         bits_left = bitstream_bits_left(gb);
         if (!bits_left || (bits_left < 16 && !bitstream_peek(gb, bits_left)))
             break;
 
-        DECODE_CODEWORD(run, run_to_cb[FFMIN(run,  15)]);
+        DECODE_CODEWORD2(run, runcb[0], runcb[1], runcb[2], runcb[3]);
         pos += run + 1;
         if (pos >= max_coeffs) {
             av_log(avctx, AV_LOG_ERROR, "ac tex damaged %d, %d\n", pos, max_coeffs);
             return AVERROR_INVALIDDATA;
         }
 
-        DECODE_CODEWORD(level, lev_to_cb[FFMIN(level, 9)]);
+        DECODE_CODEWORD2(level, levcb[0], levcb[1], levcb[2], levcb[3]);
         level += 1;
 
         i = pos >> log2_block_count;
