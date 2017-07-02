@@ -259,6 +259,69 @@ static inline unsigned bitstream_peek(BitstreamContext *bc, unsigned n)
     return show_val(bc, n);
 }
 
+#if BITSTREAM_BITS == 32
+/* For read of potentially more than 24bits
+ * Intermediate between bitstream_read and bitstream_read_63 */
+static inline uint32_t bitstream_read_mid(BitstreamContext *bc, unsigned n)
+{
+    unsigned ret = 0;
+
+    if (n > bc->bits_left) {
+        n -= bc->bits_left;
+        ret = bc->bits >> (BITSTREAM_BITS - bc->bits_left);
+        bc->bits = AV_RALL(bc->ptr);
+        bc->ptr += BITSTREAM_BITS/8;
+        bc->bits_left = BITSTREAM_BITS;
+    }
+
+    return get_val(bc, n) | ret << n;
+}
+
+/* For reads of 16 bits or less */
+static inline uint32_t bitstream_peek_short(BitstreamContext *bc, unsigned n)
+{
+    if (!n)
+        return 0;
+
+    if (n > bc->bits_left && bc->ptr < bc->buffer_end) {
+#ifdef BITSTREAM_READER_LE
+        bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << bc->bits_left;
+#else
+        bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << (BITSTREAM_HBITS - bc->bits_left);
+#endif
+        bc->ptr       += BITSTREAM_HBITS/8;
+        bc->bits_left += BITSTREAM_HBITS;
+    }
+
+    return show_val(bc, n);
+}
+
+static inline uint32_t bitstream_read_short(BitstreamContext *bc, unsigned n)
+{
+    if (!n)
+        return 0;
+
+    if (n > bc->bits_left) {
+        if (bc->ptr < bc->buffer_end) {
+#ifdef BITSTREAM_READER_LE
+            bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << bc->bits_left;
+#else
+            bc->bits      |= (cache_type)AV_RHALF(bc->ptr) << (BITSTREAM_HBITS - bc->bits_left);
+#endif
+            bc->ptr       += BITSTREAM_HBITS/8;
+            bc->bits_left += BITSTREAM_HBITS;
+        } else
+            bc->bits_left = n;
+    }
+
+    return get_val(bc, n);
+}
+#else
+# define bitstream_read_mid   bitstream_read
+# define bitstream_read_short bitstream_read
+# define bitstream_peek_short bitstream_peek
+#endif
+
 /* Return n bits from the buffer as a signed integer, but do not change the
  * buffer state. n has to be in the 0-32 range. */
 static inline int bitstream_peek_signed(BitstreamContext *bc, unsigned n)
@@ -344,7 +407,7 @@ static inline int set_idx(BitstreamContext *bc, int code, int *n, int *nb_bits,
     unsigned idx;
 
     *nb_bits = -*n;
-    idx = bitstream_peek(bc, *nb_bits) + code;
+    idx = bitstream_peek_short(bc, *nb_bits) + code;
     *n = table[idx][1];
 
     return table[idx][0];
@@ -364,7 +427,7 @@ static inline int bitstream_read_vlc(BitstreamContext *bc, VLC_TYPE (*table)[2],
                                      int bits, int max_depth)
 {
     int nb_bits;
-    unsigned idx = bitstream_peek(bc, bits);
+    unsigned idx = bitstream_peek_short(bc, bits);
     int code = table[idx][0];
     int n    = table[idx][1];
 
@@ -384,29 +447,29 @@ static inline int bitstream_read_vlc(BitstreamContext *bc, VLC_TYPE (*table)[2],
 #define BITSTREAM_RL_VLC(level, run, bc, table, bits, max_depth) \
     do {                                                         \
         int n, nb_bits;                                          \
-        unsigned index = bitstream_peek(bc, bits);               \
+        unsigned index = bitstream_peek_short(bc, bits);         \
         level = table[index].level;                              \
         n     = table[index].len;                                \
                                                                  \
         if (max_depth > 1 && n < 0) {                            \
-            bitstream_skip(bc, bits);                            \
+            skip_remaining(bc, bits);                            \
                                                                  \
             nb_bits = -n;                                        \
                                                                  \
-            index = bitstream_peek(bc, nb_bits) + level;         \
+            index = bitstream_peek_short(bc, nb_bits) + level;   \
             level = table[index].level;                          \
             n     = table[index].len;                            \
             if (max_depth > 2 && n < 0) {                        \
-                bitstream_skip(bc, nb_bits);                     \
+                skip_remaining(bc, nb_bits);                     \
                 nb_bits = -n;                                    \
                                                                  \
-                index = bitstream_peek(bc, nb_bits) + level;     \
+                index = bitstream_peek_short(bc, nb_bits) + level;\
                 level = table[index].level;                      \
                 n     = table[index].len;                        \
             }                                                    \
         }                                                        \
         run = table[index].run;                                  \
-        bitstream_skip(bc, n);                                   \
+        skip_remaining(bc, n);                                   \
     } while (0)
 
 /* Return decoded truncated unary code for the values 0, 1, 2. */
