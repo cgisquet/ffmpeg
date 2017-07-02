@@ -301,7 +301,21 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
 
 /* bitstream_read may fail on 32bits ARCHS for >24 bits, so use long version there */
 #if BITSTREAM_BITS == 32
-# define READ_BITS bitstream_read_63
+# define READ_BITS bitstream_read_long
+static inline unsigned int bitstream_read_long(BitstreamContext *bc, unsigned n)
+{
+    unsigned ret = 0;
+
+    if (n > bc->bits_left) {
+        n -= bc->bits_left;
+        ret = bc->bits >> (BITSTREAM_BITS - bc->bits_left);
+        bc->bits = AV_RALL(bc->ptr);
+        bc->ptr += BITSTREAM_BITS/8;
+        bc->bits_left = BITSTREAM_BITS;
+    }
+
+    return get_val(bc, n) | ret << n;
+}
 #else
 # define READ_BITS bitstream_read
 #endif
