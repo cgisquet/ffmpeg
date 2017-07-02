@@ -325,12 +325,9 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
             bits = exp_order - switch_bits + (q<<1);                    \
             val = READ_BITS(gb, bits) - (1 << exp_order) +              \
                 ((switch_bits + 1) << rice_order);                      \
-        } else if (rice_order) {                                        \
-            bitstream_skip(gb, q+1);                                    \
-            val = (q << rice_order) + bitstream_read(gb, rice_order);   \
         } else {                                                        \
-            val = q;                                                    \
-            bitstream_skip(gb, q+1);                                    \
+            skip_remaining(gb, q+1);                                    \
+            val = rice_order ? (q << rice_order) + bitstream_read(gb, rice_order) : q;   \
         }                                                               \
     } while (0)
 
@@ -345,12 +342,9 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
         if (q > switch_bits) { /* exp golomb */                         \
             bits = (q<<1) + (int)diff;                                  \
             val = READ_BITS(gb, bits) + (int)offset;                    \
-        } else if (rice_order) {                                        \
-            bitstream_skip(gb, q+1);                                    \
-            val = (q << rice_order) + bitstream_read(gb, rice_order);   \
         } else {                                                        \
-            val = q;                                                    \
-            bitstream_skip(gb, q+1);                                    \
+            skip_remaining(gb, q+1);                                    \
+            val = rice_order ? (q << rice_order) + bitstream_read(gb, rice_order) : q;   \
         }                                                               \
     } while (0)
 
