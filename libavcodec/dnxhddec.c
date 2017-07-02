@@ -393,7 +393,7 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
         sign = -bitstream_read_bit(&row->gb);
 
         if (flags & 1) {
-            level += bitstream_read(&row->gb, index_bits) << 7;
+            level += bitstream_read_short(&row->gb, index_bits) << 7;
         }
 
         if (flags & 2) {
@@ -465,9 +465,9 @@ static int dnxhd_decode_macroblock(const DNXHDContext *ctx, RowContext *row,
 
     if (ctx->mbaff) {
         interlaced_mb = bitstream_read_bit(&row->gb);
-        qscale = bitstream_read(&row->gb, 10);
+        qscale = bitstream_read_short(&row->gb, 10);
     } else {
-        qscale = bitstream_read(&row->gb, 11);
+        qscale = bitstream_read_short(&row->gb, 11);
     }
     act = bitstream_read_bit(&row->gb);
     if (act) {

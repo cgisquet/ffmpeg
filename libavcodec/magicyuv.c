@@ -279,23 +279,23 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
 
 #define GET_VLC_ITER2(dst, off, bc, JTable, bits, max_depth)        \
     do {                                                            \
-        unsigned int index = bitstream_peek(bc, bits);              \
+        unsigned int index = bitstream_peek_short(bc, bits);        \
         int          n = JTable[index].len;                         \
                                                                     \
         if (n>0) {                                                  \
             if (JTable[index].type) {                               \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
             } else {                                                \
                 dst[off] = JTable[index].code.for2;                 \
                 off++;                                              \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
             }                                                       \
         } else {                                                    \
-            bitstream_skip(bc, bits);                               \
+            skip_remaining(bc, bits);                               \
                                                                     \
-            index   = bitstream_read(bc, -n) + JTable[index].code.for2;    \
+            index   = bitstream_read_short(bc, -n) + JTable[index].code.for2;    \
             dst[off] = JTable[index].code.for2;                      \
             off++;                                                  \
         }                                                           \
@@ -306,7 +306,7 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
 
 #define GET_VLC_ITER(dst, off, bc, JTable, bits, max_depth)         \
     do {                                                            \
-        unsigned int index = bitstream_peek(bc, bits);              \
+        unsigned int index = bitstream_peek_short(bc, bits);        \
         int          n = JTable[index].len;                         \
                                                                     \
         if (n>0) {                                                  \
@@ -314,28 +314,28 @@ static void magicyuv_median_pred10(uint16_t *dst, const uint16_t *src1,
             case 3:                                                 \
                 AV_ZERO64(dst+off);                                 \
                 off += 8;                                           \
-                bitstream_skip(bc, 8);                              \
+                skip_remaining(bc, 8);                              \
                 break;                                              \
             case 2:                                                 \
                 AV_WN32(dst+off, JTable[index].code.for4);          \
                 off += 4;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
                 break;                                              \
             case 1:                                                 \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
                 break;                                              \
             default:                                                \
                 dst[off] = JTable[index].code.for2;                 \
                 off++;                                              \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
                 break;                                              \
             }                                                       \
         } else {                                                    \
-            bitstream_skip(bc, bits);                               \
+            skip_remaining(bc, bits);                               \
                                                                     \
-            index   = bitstream_read(bc, -n) + JTable[index].code.for2;    \
+            index   = bitstream_read_short(bc, -n) + JTable[index].code.for2;    \
             dst[off] = JTable[index].code.for2;                     \
             off++;                                                  \
         }                                                           \
@@ -369,14 +369,14 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
         if (ret < 0)
             return ret;
 
-        flags = bitstream_read(&bc, 8);
-        pred  = bitstream_read(&bc, 8);
+        flags = bitstream_read_short(&bc, 8);
+        pred  = bitstream_read_short(&bc, 8);
 
         dst = (uint16_t *)p->data[i] + j * sheight * stride;
         if (flags & 1) {
             for (k = 0; k < height; k++) {
                 for (x = 0; x < width; x++)
-                    dst[x] = bitstream_read(&bc, 10);
+                    dst[x] = bitstream_read_short(&bc, 10);
 
                 dst += stride;
             }
@@ -395,7 +395,7 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                 if( width&1 && bitstream_bits_left(&bc)>0 ) {
                     unsigned int index;
                     int nb_bits, code, n;
-                    index = bitstream_peek(&bc, VLC_BITS);
+                    index = bitstream_peek_short(&bc, VLC_BITS);
                     VLC_INTERN(dst[width-1], s->vlc[i].table,
                                &bc, VLC_BITS, 3);
                 }
@@ -506,14 +506,14 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
         if (ret < 0)
             return ret;
 
-        flags = bitstream_read(&bc, 8);
-        pred  = bitstream_read(&bc, 8);
+        flags = bitstream_read_short(&bc, 8);
+        pred  = bitstream_read_short(&bc, 8);
 
         dst = p->data[i] + j * sheight * stride;
         if (flags & 1) {
             for (k = 0; k < height; k++) {
                 for (x = 0; x < width; x++)
-                    dst[x] = bitstream_read(&bc, 8);
+                    dst[x] = bitstream_read_short(&bc, 8);
 
                 dst += stride;
             }
@@ -647,9 +647,9 @@ static int build_huffman(AVCodecContext *avctx, BitstreamContext *bc, int max)
 
     memset(s->len, 0, sizeof(s->len));
     while (bitstream_bits_left(bc) >= 8) {
-        int b = bitstream_read(bc, 4);
-        int x = bitstream_read(bc, 4);
-        int l = bitstream_read(bc, b) + 1;
+        int b = bitstream_read_short(bc, 4);
+        int x = bitstream_read_short(bc, 4);
+        int l = bitstream_read_short(bc, b) + 1;
 
         for (k = 0; k < l; k++)
             if (j + k < max)

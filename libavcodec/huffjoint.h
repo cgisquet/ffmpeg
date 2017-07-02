@@ -41,23 +41,23 @@ typedef struct JointTable {
     code = table[index][0];                                 \
     n    = table[index][1];                                 \
     if (max_depth > 1 && n < 0) {                           \
-        bitstream_skip(bc, bits);                           \
+        skip_remaining(bc, bits);                           \
                                                             \
         nb_bits = -n;                                       \
-        index   = bitstream_peek(bc, nb_bits) + code;    \
+        index   = bitstream_peek_short(bc, nb_bits) + code; \
         code    = table[index][0];                          \
         n       = table[index][1];                          \
         if (max_depth > 2 && n < 0) {                       \
-            bitstream_skip(bc, nb_bits);                    \
+            skip_remaining(bc, nb_bits);                    \
                                                             \
             nb_bits = -n;                                   \
-            index   = bitstream_peek(bc, nb_bits) + code;\
+            index   = bitstream_peek_short(bc, nb_bits) + code;\
             code    = table[index][0];                      \
             n       = table[index][1];                      \
         }                                                   \
     }                                                       \
     dst = code;                                             \
-    bitstream_skip(bc, n)
+    skip_remaining(bc, n)
 
 /**
  * Try to read into dst0 and dst1, using operation OP, 2 symbols
@@ -70,12 +70,12 @@ typedef struct JointTable {
         int nb_bits;                                                \
         VLC_INTERN(dst0, table1, bc, bits, max_depth);              \
                                                                     \
-        index = bitstream_peek(bc, bits);                        \
+        index = bitstream_peek_short(bc, bits);                     \
         VLC_INTERN(dst1, table2, bc, bits, max_depth);              \
     } else {                                                        \
         code = dtable[index][0];                                    \
         OP(dst0, dst1, code);                                       \
-        bitstream_skip(bc, n);                                      \
+        skip_remaining(bc, n);                                      \
     }
 
 /**
@@ -86,7 +86,7 @@ typedef struct JointTable {
 #define GET_VLC_DUAL(dst0, dst1, bc, dtable, table1, table2,        \
                      bits, max_depth, OP)                           \
     do {                                                            \
-        unsigned int index = bitstream_peek(bc, bits);           \
+        unsigned int index = bitstream_peek_short(bc, bits);        \
         int          code, n = dtable[index][1];                    \
                                                                     \
         GET_VLC_DUAL_INTERNAL(dst0, dst1, bc, dtable,               \
@@ -102,7 +102,7 @@ typedef struct JointTable {
  */
 #define GET_VLC_MULTI(dst, off, bc, Ftable, Dtable, table, bits, max_depth) \
     do {                                                                 \
-        unsigned int index = bitstream_peek(bc, bits);                \
+        unsigned int index = bitstream_peek_short(bc, bits);             \
         int          code, n = Ftable[index][1];                         \
                                                                          \
         if (n<=0) {                                                      \
@@ -110,7 +110,7 @@ typedef struct JointTable {
             GET_VLC_DUAL_INTERNAL(dst[off+0], dst[off+1], bc, Dtable,    \
                                   table, table, bits, max_depth, OP8bits)\
             /* And now for the last 2 */                                 \
-            index = bitstream_peek(bc, bits);                         \
+            index = bitstream_peek_short(bc, bits);                      \
             n = Dtable[index][1];                                        \
             GET_VLC_DUAL_INTERNAL(dst[off+2], dst[off+3], bc, Dtable,    \
                                   table, table, bits, max_depth, OP8bits)\
@@ -118,7 +118,7 @@ typedef struct JointTable {
             code = (unsigned int)Ftable[index][0];                       \
             dst[off+0] =  code>>12;     dst[off+1] = (code>>8)&15;       \
             dst[off+2] = (code>> 4)&15; dst[off+3] =  code    &15;       \
-            bitstream_skip(bc, n);                                       \
+            skip_remaining(bc, n);                                       \
         }                                                                \
     } while (0)
 

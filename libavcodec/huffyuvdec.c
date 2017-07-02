@@ -98,10 +98,10 @@ static int read_len_table(uint8_t *dst, BitstreamContext *bc, int n)
     int i, val, repeat;
 
     for (i = 0; i < n;) {
-        repeat = bitstream_read(bc, 3);
-        val    = bitstream_read(bc, 5);
+        repeat = bitstream_read_short(bc, 3);
+        val    = bitstream_read_short(bc, 5);
         if (repeat == 0)
-            repeat = bitstream_read(bc, 8);
+            repeat = bitstream_read_short(bc, 8);
         if (i + repeat > n || bitstream_bits_left(bc) < 0) {
             av_log(NULL, AV_LOG_ERROR, "Error reading huffman table\n");
             return AVERROR_INVALIDDATA;
@@ -666,7 +666,7 @@ static void decode_422_bitstream(HYuvContext *s, int count)
 
 #define GET_VLC_ITER(dst, off, bc, JTable, table, bits, max_depth)  \
     do {                                                            \
-        unsigned int index = bitstream_peek(bc, bits);              \
+        unsigned int index = bitstream_peek_short(bc, bits);        \
         int          code, n = JTable[index].len;                   \
                                                                     \
         if (n<=0) {                                                 \
@@ -678,17 +678,17 @@ static void decode_422_bitstream(HYuvContext *s, int count)
             case 2:                                                 \
                 AV_WN32(dst+off, JTable[index].code.for4);          \
                 off += 4;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
                 break;                                              \
             case 1:                                                 \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
                 break;                                              \
             case 0:                                                 \
                 dst[off] = JTable[index].code.for2;                 \
                 off++;                                              \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
             }                                                       \
         }                                                           \
     } while (0)
@@ -696,9 +696,9 @@ static void decode_422_bitstream(HYuvContext *s, int count)
 #define READ_4PIX_PLANE(dst, off, plane) \
     GET_VLC_ITER(dst, off, &s->bc, s->mem[plane], s->vlc[plane].table, VLC_BITS, 3)
 
-#define GET_VLC_ITER2(dst, off, bc, JTable, table, bits, max_depth)  \
+#define GET_VLC_ITER2(dst, off, bc, JTable, table, bits, max_depth) \
     do {                                                            \
-        unsigned int index = bitstream_peek(bc, bits);              \
+        unsigned int index = bitstream_peek_short(bc, bits);        \
         int          code, n = JTable[index].len;                   \
                                                                     \
         if (n<=0) {                                                 \
@@ -709,11 +709,11 @@ static void decode_422_bitstream(HYuvContext *s, int count)
             if (JTable[index].type) {                               \
                 AV_WN16(dst+off, JTable[index].code.for2);          \
                 off += 2;                                           \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
             } else {                                                \
                 dst[off] = JTable[index].code.for2;                 \
                 off++;                                              \
-                bitstream_skip(bc, n);                              \
+                skip_remaining(bc, n);                              \
             }                                                       \
         }                                                           \
     } while (0)
@@ -749,7 +749,7 @@ static void decode_gray_bitstream(HYuvContext *s, int count)
     for( ; i < count && bitstream_bits_left(&s->bc)>0; i++ ) {
         unsigned int index;
         int nb_bits, code, n;
-        index = bitstream_peek(&s->bc, VLC_BITS);
+        index = bitstream_peek_short(&s->bc, VLC_BITS);
         VLC_INTERN(dst[i], s->vlc[0].table,
                    &s->bc, VLC_BITS, 3);
     }
@@ -764,9 +764,9 @@ static void decode_gray_bitstream(HYuvContext *s, int count)
  * of the joint table, jump into the 2nd level of the individual table. */
 #define READ_2PIX_PLANE16(dst0, dst1, plane){\
     dst0 = bitstream_read_vlc(&s->bc, s->vlc[plane].table, VLC_BITS, 3)<<2;\
-    dst0 += bitstream_read(&s->bc, 2);\
+    dst0 += bitstream_read_short(&s->bc, 2);\
     dst1 = bitstream_read_vlc(&s->bc, s->vlc[plane].table, VLC_BITS, 3)<<2;\
-    dst1 += bitstream_read(&s->bc, 2);\
+    dst1 += bitstream_read_short(&s->bc, 2);\
 }
 
 static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
@@ -789,7 +789,7 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         if( width&1 && bitstream_bits_left(&s->bc)>0 ) {
             unsigned int index;
             int nb_bits, code, n;
-            index = bitstream_peek(&s->bc, VLC_BITS);
+            index = bitstream_peek_short(&s->bc, VLC_BITS);
             VLC_INTERN(s->temp16[0][width-1], s->vlc[plane].table,
                        &s->bc, VLC_BITS, 3);
         }
@@ -806,7 +806,7 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         }
         if( width&1 && bitstream_bits_left(&s->bc)>0 ) {
             int dst = bitstream_read_vlc(&s->bc, s->vlc[plane].table, VLC_BITS, 3)<<2;
-            s->temp16[0][width-1] = dst + bitstream_read(&s->bc, 2);
+            s->temp16[0][width-1] = dst + bitstream_read_short(&s->bc, 2);
         }
     }
 }
@@ -820,40 +820,40 @@ static av_always_inline void decode_bgr_1(HYuvContext *s, int count,
         unsigned int index;
         int code, n, nb_bits;
 
-        index = bitstream_peek(&s->bc, VLC_BITS);
+        index = bitstream_peek_short(&s->bc, VLC_BITS);
         n     = s->vlc[4].table[index][1];
 
         if (n>0) {
             code  = s->vlc[4].table[index][0];
             *(uint32_t *) &s->temp[0][4 * i] = s->pix_bgr_map[code];
-            bitstream_skip(&s->bc, n);
+            skip_remaining(&s->bc, n);
         } else {
             if (decorrelate) {
                 VLC_INTERN(s->temp[0][4 * i + G], s->vlc[1].table,
                            &s->bc, VLC_BITS, 3);
 
-                index = bitstream_peek(&s->bc, VLC_BITS);
+                index = bitstream_peek_short(&s->bc, VLC_BITS);
                 VLC_INTERN(code, s->vlc[0].table, &s->bc, VLC_BITS, 3);
                 s->temp[0][4 * i + B] = code + s->temp[0][4 * i + G];
 
-                index = bitstream_peek(&s->bc, VLC_BITS);
+                index = bitstream_peek_short(&s->bc, VLC_BITS);
                 VLC_INTERN(code, s->vlc[2].table, &s->bc, VLC_BITS, 3);
                 s->temp[0][4 * i + R] = code + s->temp[0][4 * i + G];
             } else {
                 VLC_INTERN(s->temp[0][4 * i + B], s->vlc[0].table,
                            &s->bc, VLC_BITS, 3);
 
-                index = bitstream_peek(&s->bc, VLC_BITS);
+                index = bitstream_peek_short(&s->bc, VLC_BITS);
                 VLC_INTERN(s->temp[0][4 * i + G], s->vlc[1].table,
                            &s->bc, VLC_BITS, 3);
 
-                index = bitstream_peek(&s->bc, VLC_BITS);
+                index = bitstream_peek_short(&s->bc, VLC_BITS);
                 VLC_INTERN(s->temp[0][4 * i + R], s->vlc[2].table,
                            &s->bc, VLC_BITS, 3);
             }
         }
         if (alpha) {
-            index = bitstream_peek(&s->bc, VLC_BITS);
+            index = bitstream_peek_short(&s->bc, VLC_BITS);
             VLC_INTERN(s->temp[0][4 * i + A], s->vlc[2].table,
                        &s->bc, VLC_BITS, 3);
         } else
@@ -1046,22 +1046,22 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         int lefttopy, lefttopu, lefttopv;
 
         if (s->yuy2) {
-            p->data[0][3] = bitstream_read(&s->bc, 8);
-            p->data[0][2] = bitstream_read(&s->bc, 8);
-            p->data[0][1] = bitstream_read(&s->bc, 8);
-            p->data[0][0] = bitstream_read(&s->bc, 8);
+            p->data[0][3] = bitstream_read_short(&s->bc, 8);
+            p->data[0][2] = bitstream_read_short(&s->bc, 8);
+            p->data[0][1] = bitstream_read_short(&s->bc, 8);
+            p->data[0][0] = bitstream_read_short(&s->bc, 8);
 
             av_log(avctx, AV_LOG_ERROR,
                    "YUY2 output is not implemented yet\n");
             return AVERROR_PATCHWELCOME;
         } else {
             leftv         =
-            p->data[2][0] = bitstream_read(&s->bc, 8);
+            p->data[2][0] = bitstream_read_short(&s->bc, 8);
             lefty         =
-            p->data[0][1] = bitstream_read(&s->bc, 8);
+            p->data[0][1] = bitstream_read_short(&s->bc, 8);
             leftu         =
-            p->data[1][0] = bitstream_read(&s->bc, 8);
-            p->data[0][0] = bitstream_read(&s->bc, 8);
+            p->data[1][0] = bitstream_read_short(&s->bc, 8);
+            p->data[0][0] = bitstream_read_short(&s->bc, 8);
 
             switch (s->predictor) {
             case LEFT:
@@ -1210,14 +1210,14 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
         const int last_line = (height - 1) * p->linesize[0];
 
         if (s->bitstream_bpp == 32) {
-            left[A] = p->data[0][last_line + A] = bitstream_read(&s->bc, 8);
-            left[R] = p->data[0][last_line + R] = bitstream_read(&s->bc, 8);
-            left[G] = p->data[0][last_line + G] = bitstream_read(&s->bc, 8);
-            left[B] = p->data[0][last_line + B] = bitstream_read(&s->bc, 8);
+            left[A] = p->data[0][last_line + A] = bitstream_read_short(&s->bc, 8);
+            left[R] = p->data[0][last_line + R] = bitstream_read_short(&s->bc, 8);
+            left[G] = p->data[0][last_line + G] = bitstream_read_short(&s->bc, 8);
+            left[B] = p->data[0][last_line + B] = bitstream_read_short(&s->bc, 8);
         } else {
-            left[R] = p->data[0][last_line + R] = bitstream_read(&s->bc, 8);
-            left[G] = p->data[0][last_line + G] = bitstream_read(&s->bc, 8);
-            left[B] = p->data[0][last_line + B] = bitstream_read(&s->bc, 8);
+            left[R] = p->data[0][last_line + R] = bitstream_read_short(&s->bc, 8);
+            left[G] = p->data[0][last_line + G] = bitstream_read_short(&s->bc, 8);
+            left[B] = p->data[0][last_line + B] = bitstream_read_short(&s->bc, 8);
             left[A] = p->data[0][last_line + A] = 255;
             bitstream_skip(&s->bc, 8);
         }

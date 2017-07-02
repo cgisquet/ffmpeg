@@ -299,34 +299,13 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
     return pic_data_size;
 }
 
-/* bitstream_read may fail on 32bits ARCHS for >24 bits, so use long version there */
-#if BITSTREAM_BITS == 32
-# define READ_BITS bitstream_read_long
-static inline unsigned int bitstream_read_long(BitstreamContext *bc, unsigned n)
-{
-    unsigned ret = 0;
-
-    if (n > bc->bits_left) {
-        n -= bc->bits_left;
-        ret = bc->bits >> (BITSTREAM_BITS - bc->bits_left);
-        bc->bits = AV_RALL(bc->ptr);
-        bc->ptr += BITSTREAM_BITS/8;
-        bc->bits_left = BITSTREAM_BITS;
-    }
-
-    return get_val(bc, n) | ret << n;
-}
-#else
-# define READ_BITS bitstream_read
-#endif
-
 /* Kept for reference and because clearer for first DC */
 #define DECODE_CODEWORD(val, codebook)                                  \
     do {                                                                \
         unsigned int rice_order, exp_order, switch_bits;                \
         unsigned int q, buf, bits;                                      \
                                                                         \
-        buf = bitstream_peek(gb, 14);                                   \
+        buf = bitstream_peek_short(gb, 14);                             \
                                                                         \
         /* number of bits to switch between rice and exp golomb */      \
         switch_bits =  codebook & 3;                                    \
@@ -337,11 +316,11 @@ static inline unsigned int bitstream_read_long(BitstreamContext *bc, unsigned n)
                                                                         \
         if (q > switch_bits) { /* exp golomb */                         \
             bits = exp_order - switch_bits + (q<<1);                    \
-            val = READ_BITS(gb, bits) - (1 << exp_order) +              \
+            val = bitstream_read_mid(gb, bits) - (1 << exp_order) +     \
                 ((switch_bits + 1) << rice_order);                      \
         } else {                                                        \
             skip_remaining(gb, q+1);                                    \
-            val = rice_order ? (q << rice_order) + bitstream_read(gb, rice_order) : q;   \
+            val = rice_order ? (q << rice_order) + bitstream_read_short(gb, rice_order) : q;   \
         }                                                               \
     } while (0)
 
@@ -350,15 +329,15 @@ static inline unsigned int bitstream_read_long(BitstreamContext *bc, unsigned n)
     do {                                                                \
         unsigned int q, buf, bits;                                      \
                                                                         \
-        buf = bitstream_peek(gb, 14);                                   \
+        buf = bitstream_peek_short(gb, 14);                             \
         q = 13 - av_log2(buf);                                          \
                                                                         \
         if (q > switch_bits) { /* exp golomb */                         \
             bits = (q<<1) + (int)diff;                                  \
-            val = READ_BITS(gb, bits) + (int)offset;                    \
+            val = bitstream_read_mid(gb, bits) + (int)offset;           \
         } else {                                                        \
             skip_remaining(gb, q+1);                                    \
-            val = rice_order ? (q << rice_order) + bitstream_read(gb, rice_order) : q;   \
+            val = rice_order ? (q << rice_order) + bitstream_read_short(gb, rice_order) : q;   \
         }                                                               \
     } while (0)
 
@@ -424,7 +403,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
         const char* runcb = &run_to_cb[FFMIN(run,  15)];
 
         bits_left = bitstream_bits_left(gb);
-        if (!bits_left || (bits_left < 16 && !bitstream_peek(gb, bits_left)))
+        if (!bits_left || (bits_left < 16 && !bitstream_peek_short(gb, bits_left)))
             break;
 
         DECODE_CODEWORD2(run, runcb[0], runcb[1], runcb[2], runcb[3]);
@@ -523,10 +502,10 @@ static void unpack_alpha(BitstreamContext *gb, uint16_t *dst, int num_coeffs,
     do {
         do {
             if (bitstream_read_bit(gb)) {
-                val = bitstream_read(gb, num_bits);
+                val = bitstream_read_short(gb, num_bits);
             } else {
                 int sign;
-                val  = bitstream_read(gb, num_bits == 16 ? 7 : 4);
+                val  = bitstream_read_short(gb, num_bits == 16 ? 7 : 4);
                 sign = val & 1;
                 val  = (val + 2) >> 1;
                 if (sign)
@@ -541,9 +520,9 @@ static void unpack_alpha(BitstreamContext *gb, uint16_t *dst, int num_coeffs,
             if (idx >= num_coeffs)
                 break;
         } while (bitstream_bits_left(gb)>0 && bitstream_read_bit(gb));
-        val = bitstream_read(gb, 4);
+        val = bitstream_read_short(gb, 4);
         if (!val)
-            val = bitstream_read(gb, 11);
+            val = bitstream_read_short(gb, 11);
         if (idx + val > num_coeffs)
             val = num_coeffs - idx;
         if (num_bits == 16) {
