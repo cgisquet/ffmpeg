@@ -367,8 +367,9 @@ static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out
     code = 5;
     sign = 0;
     for (i = 1; i < blocks_per_slice; i++, out += 64) {
-        const char *dccb = &dc_codebook[FFMIN(code, 6U)];
-        DECODE_CODEWORD2(code, dccb[0], dccb[1], dccb[2], dccb[3]);
+        unsigned int dccb = FFMIN(code, 6U);
+        DECODE_CODEWORD2(code, dc_codebook[dccb][0], dc_codebook[dccb][1],
+                               dc_codebook[dccb][2], dc_codebook[dccb][3]);
         if(code) sign ^= -(code & 1);
         else     sign  = 0;
         prev_dc += (((code + 1) >> 1) ^ sign) - sign;
@@ -402,13 +403,14 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
     for (pos = block_mask;;) {
         static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4, 5 };
         const VLC* tbl = ctx->ac_vlc + ctx_to_tbl[FFMIN(level, 9)];
-        const char* runcb = &run_to_cb[FFMIN(run,  15)];
+        unsigned int runcb = FFMIN(run,  15);
 
         bits_left = bitstream_bits_left(gb);
         if (!bits_left || (bits_left < 16 && !bitstream_peek_short(gb, bits_left)))
             break;
 
-        DECODE_CODEWORD2(run, runcb[0], runcb[1], runcb[2], runcb[3]);
+        DECODE_CODEWORD2(run, run_to_cb[runcb][0], run_to_cb[runcb][1],
+                              run_to_cb[runcb][2], run_to_cb[runcb][3]);
         pos += run + 1;
         if (pos >= max_coeffs) {
             av_log(avctx, AV_LOG_ERROR, "ac tex damaged %d, %d\n", pos, max_coeffs);
