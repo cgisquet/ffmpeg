@@ -78,7 +78,9 @@ static av_cold int decode_init(AVCodecContext *avctx)
         switch_val  = (switch_bits+1) << rice_order;
 
         // Values are actually transformed, but this is more a wrapping
-        for (ac = 0; ac <1<<AC_BITS; ac++) {
+        ac_bits[0] = 0;
+        ac_codes[0] = 0;
+        for (ac = 0; ac <(1<<AC_BITS)-1; ac++) {
             int exponent, bits, val = ac;
             unsigned int code;
 
@@ -95,8 +97,8 @@ static av_cold int decode_init(AVCodecContext *avctx)
                 code = 1;
             }
             if (bits > max_bits) max_bits = bits;
-            ac_bits [ac] = bits;
-            ac_codes[ac] = code;
+            ac_bits [ac+1] = bits;
+            ac_codes[ac+1] = code;
         }
 
         ff_free_vlc(ctx->ac_vlc+i);
@@ -414,7 +416,6 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
         }
 
         level = bitstream_read_vlc(gb, tbl->table, PRORES_LEV_BITS, 3);
-        level += 1;
 
         i = pos >> log2_block_count;
 
