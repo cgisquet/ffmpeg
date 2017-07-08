@@ -27,31 +27,41 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-#define UNCHECKED_BITSTREAM_READER 1
-
 #include "libavutil/intreadwrite.h"
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
+#include "huffjoint.h"
 #include "internal.h"
 #include "bitstream.h"
 #include "thread.h"
 #include "utvideo.h"
 
+#define VLC_BITS 12
+
 static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym)
 {
-    int i;
+    int i, ret, last;
     HuffEntry he[1024];
-    int last;
+    uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
+    uint16_t lut[1024];
     uint32_t codes[1024];
     uint8_t bits[1024];
     uint16_t syms[1024];
     uint32_t code;
 
+    vlc[0].table = NULL;
+    vlc[1].table = NULL;
+    if (!jsym)
+        return AVERROR(ENOMEM);
+    memset(lut, 0xFF, sizeof(lut));
+
     *fsym = -1;
     for (i = 0; i < 1024; i++) {
         he[i].sym = i;
         he[i].len = *src++;
+        if (he[i].len > 32)
+            return AVERROR_INVALIDDATA;
     }
     qsort(he, 1024, sizeof(*he), ff_ut10_huff_cmp_len);
 
@@ -64,33 +74,43 @@ static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym)
     while (he[last].len == 255 && last)
         last--;
 
-    if (he[last].len > 32) {
+    if (he[last].len > 32)
         return -1;
-    }
 
     code = 1;
     for (i = last; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
         syms[i]  = he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
-#define VLC_BITS 11
-    return ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
-                              bits,  sizeof(*bits),  sizeof(*bits),
-                              codes, sizeof(*codes), sizeof(*codes),
-                              syms,  sizeof(*syms),  sizeof(*syms), 0);
+    ret = ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
+                             bits,  sizeof(*bits),  sizeof(*bits),
+                             codes, sizeof(*codes), sizeof(*codes),
+                             syms,  sizeof(*syms),  sizeof(*syms), 0);
+    if (ret < 0)
+        return ret;
+    return ff_huff_joint_gen(vlc+1, jsym, last + 1, VLC_BITS,
+                             codes, codes, bits, bits, lut, lut);
 }
 
 static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
 {
-    int i;
+    int i, ret, last;
     HuffEntry he[256];
-    int last;
     uint32_t codes[256];
     uint8_t bits[256];
-    uint8_t syms[256];
+    uint16_t syms[256];
+    uint16_t lut[256];
+    uint16_t *jsym = ff_huff_joint_alloc(VLC_BITS);
     uint32_t code;
+
+    vlc[0].table = NULL;
+    vlc[1].table = NULL;
+    if (!jsym)
+        return AVERROR(ENOMEM);
+    memset(lut, 0xFF, sizeof(lut));
 
     *fsym = -1;
     for (i = 0; i < 256; i++) {
@@ -116,13 +136,18 @@ static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
         syms[i]  = he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
-    return ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
+    ret =  ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
                               bits,  sizeof(*bits),  sizeof(*bits),
                               codes, sizeof(*codes), sizeof(*codes),
                               syms,  sizeof(*syms),  sizeof(*syms), 0);
+    if (ret < 0)
+        return ret;
+    return ff_huff_joint_gen(vlc+1, jsym, last + 1, VLC_BITS,
+                             codes, codes, bits, bits, lut, lut);
 }
 
 static int decode_plane10(UtvideoContext *c, int plane_no,
@@ -133,11 +158,11 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
 {
     int i, j, slice, pix, ret;
     int sstart, send;
-    VLC vlc;
+    VLC vlc[2];
     BitstreamContext bc;
     int prev, fsym;
 
-    if ((ret = build_huff10(huff, &vlc, &fsym)) < 0) {
+    if ((ret = build_huff10(huff, vlc, &fsym)) < 0) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return ret;
     }
@@ -197,7 +222,8 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
         for (j = sstart; j < send; j++) {
             uint16_t* buf = step == 1 && !use_pred ? dest : c->buffer;
             for (i = 0; i < width; i++) {
-                buf[i] = bitstream_read_vlc(&bc, vlc.table, vlc.bits, 3);
+                GET_VLC_DUAL(buf[i+0], buf[i+1], &bc, vlc[1].table,
+                             vlc[0].table, vlc[0].table, VLC_BITS, 3, OP14bits);
             }
             if (bitstream_bits_left(&bc) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
@@ -232,13 +258,17 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
                    "%d bits left after decoding slice\n", bitstream_bits_left(&bc));
     }
 
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
 
     return 0;
 fail:
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
     return AVERROR_INVALIDDATA;
 }
+
+#define OP8U(dst0, dst1, code) dst0 = ((unsigned)code)>>8; dst1 = code
 
 static int decode_plane(UtvideoContext *c, int plane_no,
                         uint8_t *dst, int step, ptrdiff_t stride,
@@ -247,12 +277,12 @@ static int decode_plane(UtvideoContext *c, int plane_no,
 {
     int i, j, slice, pix;
     int sstart, send;
-    VLC vlc;
+    VLC vlc[2];
     BitstreamContext bc;
     int prev, fsym;
     const int cmask = c->interlaced ? ~(1 + 2 * (!plane_no && c->avctx->pix_fmt == AV_PIX_FMT_YUV420P)) : ~(!plane_no && c->avctx->pix_fmt == AV_PIX_FMT_YUV420P);
 
-    if (build_huff(src, &vlc, &fsym)) {
+    if (build_huff(src, vlc, &fsym)) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return AVERROR_INVALIDDATA;
     }
@@ -312,8 +342,9 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         prev = 0x80;
         for (j = sstart; j < send; j++) {
             uint8_t* buf = step == 1 && !use_pred ? dest : c->buffer;
-            for (i = 0; i < width; i++) {
-                buf[i] = bitstream_read_vlc(&bc, vlc.table, vlc.bits, 3);
+            for (i = 0; i < width; i+=2) {
+                GET_VLC_DUAL(buf[i+0], buf[i+1], &bc, vlc[1].table,
+                             vlc[0].table, vlc[0].table, VLC_BITS, 3, OP8U);
             }
             if (bitstream_bits_left(&bc) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
@@ -342,11 +373,13 @@ static int decode_plane(UtvideoContext *c, int plane_no,
                    "%d bits left after decoding slice\n", bitstream_bits_left(&bc));
     }
 
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
 
     return 0;
 fail:
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
     return AVERROR_INVALIDDATA;
 }
 
