@@ -27,8 +27,8 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-#define CACHED_BITSTREAM_READER ARCH_X86
 #define UNCHECKED_BITSTREAM_READER 1
+#include "huffjoint.h"
 
 #include "libavutil/intreadwrite.h"
 #include "libavutil/pixdesc.h"
@@ -40,16 +40,22 @@
 #include "thread.h"
 #include "utvideo.h"
 
-static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym)
+#define VLC_BITS 12
+
+static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym, uint16_t *jsym)
 {
-    int i;
+    int i, last;
     HuffEntry he[1024];
-    int last;
+    uint16_t lut[1024];
     uint32_t codes[1024];
     uint8_t bits[1024];
     uint16_t syms[1024];
     uint32_t code;
 
+    vlc[0].table = NULL;
+    vlc[1].table = NULL;
+    memset(lut, 0xFF, sizeof(lut));
+
     *fsym = -1;
     for (i = last = 0; i < 1024; i++) {
         he[last].sym = i;
@@ -74,27 +80,38 @@ static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym)
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
         syms[i]  = he[i].sym;
+        lut[syms[i]] = i;
         code += 0x80000000u >> (he[i].len - 1);
     }
-#define VLC_BITS 11
-    return ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
-                              bits,  sizeof(*bits),  sizeof(*bits),
-                              codes, sizeof(*codes), sizeof(*codes),
-                              syms,  sizeof(*syms),  sizeof(*syms), 0);
+
+    ff_free_vlc(vlc);
+    if (ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
+                           bits,  sizeof(*bits),  sizeof(*bits),
+                           codes, sizeof(*codes), sizeof(*codes),
+                           syms,  sizeof(*syms),  sizeof(*syms), 0))
+        return AVERROR_INVALIDDATA;
+
+    // Tables are sparse in the middle, can't be called with last
+    return ff_huff_joint_gen(vlc+1, jsym, 1024, VLC_BITS,
+                             codes, codes, bits, bits, lut, lut);
 }
 
-static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
+static int build_huff(const uint8_t *src, VLC *vlc, int *fsym, uint16_t *jsym)
 {
-    int i;
+    int i, last;
     HuffEntry he[256];
-    int last;
     uint32_t codes[256];
     uint8_t bits[256];
-    uint8_t syms[256];
+    uint16_t syms[256];
+    uint16_t lut[256];
     uint32_t code;
 
+    vlc[0].table = NULL;
+    vlc[1].table = NULL;
+    memset(lut, 0xFF, sizeof(lut));
+
     *fsym = -1;
-    for (i = last = 0; i < 1024; i++) {
+    for (i = last = 0; i < 256; i++) {
         he[last].sym = i;
         he[last].len = *src++;
         if (he[last].len <= 32)
@@ -104,7 +121,7 @@ static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
     }
     if (!last)
         return AVERROR_INVALIDDATA;
-    qsort(he, last, sizeof(*he), ff_ut10_huff_cmp_len);
+    qsort(he, last, sizeof(*he), ff_ut_huff_cmp_len);
 
     if (!he[0].len) {
         *fsym = he[0].sym;
@@ -117,13 +134,21 @@ static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
         syms[i]  = he[i].sym;
+        lut[syms[i]] = i;
+        //printf("%i -> %i\n", i, syms[i]);
         code += 0x80000000u >> (he[i].len - 1);
     }
 
-    return ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
-                              bits,  sizeof(*bits),  sizeof(*bits),
-                              codes, sizeof(*codes), sizeof(*codes),
-                              syms,  sizeof(*syms),  sizeof(*syms), 0);
+    ff_free_vlc(vlc);
+    if (ff_init_vlc_sparse(vlc, VLC_BITS, last + 1,
+                           bits,  sizeof(*bits),  sizeof(*bits),
+                           codes, sizeof(*codes), sizeof(*codes),
+                           syms,  sizeof(*syms),  sizeof(*syms), 0))
+        return AVERROR_INVALIDDATA;
+
+    // Tables are sparse in the middle, can't be called with last
+    return ff_huff_joint_gen(vlc+1, jsym, 256, VLC_BITS,
+                             codes, codes, bits, bits, lut, lut);
 }
 
 static int decode_plane10(UtvideoContext *c, int plane_no,
@@ -134,11 +159,11 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
 {
     int i, j, slice, pix, ret;
     int sstart, send;
-    VLC vlc;
+    VLC vlc[2];
     GetBitContext gb;
     int prev, fsym;
 
-    if ((ret = build_huff10(huff, &vlc, &fsym)) < 0) {
+    if ((ret = build_huff10(huff, vlc, &fsym, c->jsym)) < 0) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return ret;
     }
@@ -197,14 +222,12 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
         prev = 0x200;
         for (j = sstart; j < send; j++) {
             uint16_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width; i++) {
-                pix = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
-                if (pix < 0) {
-                    av_log(c->avctx, AV_LOG_ERROR, "Decoding error\n");
-                    goto fail;
-                }
-                buf[i] = pix;
+            for (i = 0; i < width-1; i+=2) {
+                GET_VLC_DUAL(buf[i+0], buf[i+1], &gb, vlc[1].table,
+                             vlc[0].table, vlc[0].table, VLC_BITS, 3, OP14bits);
             }
+            if (width&1)
+                buf[width-1] = get_vlc2(&gb, vlc[0].table, VLC_BITS, 3);
             if (get_bits_left(&gb) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
                         "Slice decoding ran out of bits\n");
@@ -221,11 +244,13 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
                    "%d bits left after decoding slice\n", get_bits_left(&gb));
     }
 
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
 
     return 0;
 fail:
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
     return AVERROR_INVALIDDATA;
 }
 
@@ -239,6 +264,8 @@ static int compute_cmask(int plane_no, int interlaced, enum AVPixelFormat pix_fm
     return ~is_luma;
 }
 
+#define OP8U(dst0, dst1, code) dst0 = ((unsigned)code)>>8; dst1 = code
+
 static int decode_plane(UtvideoContext *c, int plane_no,
                         uint8_t *dst, ptrdiff_t stride,
                         int width, int height,
@@ -246,7 +273,7 @@ static int decode_plane(UtvideoContext *c, int plane_no,
 {
     int i, j, slice, pix;
     int sstart, send;
-    VLC vlc;
+    VLC vlc[2];
     GetBitContext gb;
     int ret, prev, fsym;
     const int cmask = compute_cmask(plane_no, c->interlaced, c->avctx->pix_fmt);
@@ -298,7 +325,7 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         return 0;
     }
 
-    if (build_huff(src, &vlc, &fsym)) {
+    if (build_huff(src, vlc, &fsym, c->jsym)) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return AVERROR_INVALIDDATA;
     }
@@ -358,23 +385,21 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         prev = 0x80;
         for (j = sstart; j < send; j++) {
             uint8_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width; i++) {
-                int pix = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
-                if (pix < 0) {
-                    av_log(c->avctx, AV_LOG_ERROR, "Decoding error\n");
-                    goto fail;
-                }
-                buf[i] = pix;
+            for (i = 0; i < width-1; i+=2) {
+                GET_VLC_DUAL(buf[i+0], buf[i+1], &gb, vlc[1].table,
+                             vlc[0].table, vlc[0].table, VLC_BITS, 3, OP8U);
             }
+            if (width&1)
+                buf[width-1] = get_vlc2(&gb, vlc[0].table, VLC_BITS, 3);
             if (get_bits_left(&gb) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
                         "Slice decoding ran out of bits\n");
                 goto fail;
             }
 
-              if (use_pred)
-                  c->llviddsp.add_left_pred(dest, buf, width, prev);
-              prev = dest[width-1];
+            if (use_pred)
+                c->llviddsp.add_left_pred(dest, buf, width, prev);
+            prev = dest[width-1];
             dest += stride;
         }
         if (get_bits_left(&gb) > 32)
@@ -382,11 +407,13 @@ static int decode_plane(UtvideoContext *c, int plane_no,
                    "%d bits left after decoding slice\n", get_bits_left(&gb));
     }
 
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
 
     return 0;
 fail:
-    ff_free_vlc(&vlc);
+    ff_free_vlc(vlc+0);
+    ff_free_vlc(vlc+1);
     return AVERROR_INVALIDDATA;
 }
 
@@ -1036,6 +1063,12 @@ static av_cold int decode_init(AVCodecContext *avctx)
     if (!c->buffer)
         return AVERROR(ENOMEM);
 
+    c->jsym = ff_huff_joint_alloc(VLC_BITS);
+    if (!c->jsym) {
+        av_freep(&c->buffer);
+        return AVERROR(ENOMEM);
+    }
+
     av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &h_shift, &v_shift);
     if ((avctx->width  & ((1<<h_shift)-1)) ||
         (avctx->height & ((1<<v_shift)-1))) {
@@ -1092,6 +1125,7 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
     av_freep(&c->slice_bits);
     av_freep(&c->buffer);
+    av_freep(&c->jsym);
 
     return 0;
 }
