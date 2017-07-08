@@ -132,7 +132,7 @@ static void unpack_alpha_12(GetBitContext *gb, uint16_t *dst, int num_coeffs,
 #define AC_BITS 12
 #define PRORES_LEV_BITS 9
 
-static const uint8_t ac_info[] = { 0x04, 0x0A, 0x05, 0x06, 0x28, 0x4C };
+static const uint8_t ac_info[] = { 0x04, 0x0A, 0x05, 0x06, 0x28, 0x29 };
 
 static av_cold int decode_init(AVCodecContext *avctx)
 {
@@ -203,9 +203,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
         switch_val  = (switch_bits+1) << rice_order;
 
         // Values are actually transformed, but this is more a wrapping
-        ac_bits[0] = 0;
-        ac_codes[0] = 0;
-        for (ac = 0; ac <(1<<AC_BITS)-1; ac++) {
+        for (ac = 0; ac <1<<AC_BITS; ac++) {
             int exponent, bits, val = ac;
             unsigned int code;
 
@@ -222,8 +220,8 @@ static av_cold int decode_init(AVCodecContext *avctx)
                 code = 1;
             }
             if (bits > max_bits) max_bits = bits;
-            ac_bits [ac+1] = bits;
-            ac_codes[ac+1] = code;
+            ac_bits [ac] = bits;
+            ac_codes[ac] = code;
         }
 
         ff_free_vlc(ctx->ac_vlc+i);
@@ -479,12 +477,9 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
                 return AVERROR_INVALIDDATA;                             \
             val = READ_BITS(gb, bits) - (1 << exp_order) +              \
                 ((switch_bits + 1) << rice_order);                      \
-        } else if (rice_order) {                                        \
-            skip_remaining(gb, q+1);                                    \
-            val = (q << rice_order) + get_bits(gb, rice_order);         \
         } else {                                                        \
-            val = q;                                                    \
             skip_remaining(gb, q+1);                                    \
+            val = rice_order ? (q << rice_order) + get_bits(gb, rice_order) : q;\
         }                                                               \
     } while (0)
 
@@ -501,12 +496,10 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
             if (bits > FFMIN(MIN_CACHE_BITS, 31))                       \
                 return AVERROR_INVALIDDATA;                             \
             val = READ_BITS(gb, bits) + (int)offset;                    \
-        } else if (rice_order) {                                        \
-            skip_remaining(gb, q+1);                                    \
-            val = (q << rice_order) + get_bits(gb, rice_order);         \
         } else {                                                        \
-            val = q;                                                    \
             skip_remaining(gb, q+1);                                    \
+            val = rice_order ? (q << rice_order) + show_val(gb, rice_order) : q;   \
+            skip_remaining(gb, rice_order);                             \
         }                                                               \
     } while (0)
 
@@ -545,14 +538,6 @@ static av_always_inline int decode_dc_coeffs(GetBitContext *gb, int16_t *out,
     return 0;
 }
 
-// adaptive codebook switching lut according to previous run values
-static const char run_to_cb[16][4] = {
-    { 2, 0, -1,  1 }, { 2, 0, -1,  1 }, { 1, 0, 0,  0 }, { 1, 0,  0,  0 }, { 0, 0, 1, -1 },
-    { 1, 1,  1,  0 }, { 1, 1,  1,  0 }, { 1, 1, 1,  0 }, { 1, 1,  1,  0 },
-    { 0, 1,  2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1,  2, -2 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
-    { 0, 2,  3, -4 }
-};
-
 static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContext *gb,
                                              int16_t *out, int blocks_per_slice)
 {
@@ -569,22 +554,32 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
     block_mask = blocks_per_slice - 1;
 
     for (pos = block_mask;;) {
-        static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4, 5 };
-        const VLC* tbl = ctx->ac_vlc + ctx_to_tbl[FFMIN(level, 9)];
-        unsigned int runcb = FFMIN(run,  15);
         bits_left = get_bits_left(gb);
-        if (!bits_left || (bits_left < 16 && !show_bits(gb, bits_left)))
+        if (!bits_left || (bits_left < 14 && !show_bits(gb, bits_left)))
             break;
 
-        DECODE_CODEWORD2(run, run_to_cb[runcb][0], run_to_cb[runcb][1],
-                              run_to_cb[runcb][2], run_to_cb[runcb][3]);
+        if (run < 15) {
+            static const uint8_t ctx_to_tbl[] = { 3, 3, 2, 2, 0, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4 };
+            const VLC* tbl = ctx->ac_vlc + ctx_to_tbl[run];
+            run = get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
+        } else {
+            unsigned int bits = 21 - 2*av_log2(show_bits_short(gb, 10));
+            run = READ_BITS(gb, bits) - 4; // up to 17 bits
+        }
         pos += run + 1;
         if (pos >= max_coeffs) {
             av_log(avctx, AV_LOG_ERROR, "ac tex damaged %d, %d\n", pos, max_coeffs);
             return AVERROR_INVALIDDATA;
         }
 
-        level = get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
+        if (level < 9) {
+            static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4 };
+            const VLC* tbl = ctx->ac_vlc + ctx_to_tbl[level];
+            level = 1+get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
+        } else {
+            unsigned int bits = 25 - 2*av_log2(show_bits_short(gb, 12));
+            level = READ_BITS(gb, bits) - 4 + 1; // up to 21 bits
+        }
 
         i = pos >> log2_block_count;
 
