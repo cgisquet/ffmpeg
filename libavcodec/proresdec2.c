@@ -536,7 +536,7 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
 
 static const char dc_codebook[][4] = {
     { 0, 0, 1, -1 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
-    { 1, 2, 2,  0 }, { 1, 2, 2,  0 }, { 0, 3, 4, -8 }, { 0, 3, 4, -8 }
+    { 1, 2, 2,  0 }, { 1, 2, 2,  0 }, { 0, 3, 4, -8 }
 };
 
 static av_always_inline int decode_dc_coeffs(GetBitContext *gb, int16_t *out,
