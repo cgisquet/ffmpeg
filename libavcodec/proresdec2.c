@@ -347,9 +347,9 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
 
 #define FIRST_DC_CB 0xB8
 
-static const char dc_codebook[7][4] = {
+static const char dc_codebook[6][4] = {
     { 0, 0, 1, -1 }, { 0, 1, 2, -2 }, { 0, 1, 2, -2 },
-    { 1, 2, 2,  0 }, { 1, 2, 2,  0 }, { 0, 3, 4, -8 }, { 0, 3, 4, -8 }
+    { 1, 2, 2,  0 }, { 1, 2, 2,  0 }, { 0, 3, 4, -8 }
 };
 
 static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out,
@@ -366,7 +366,7 @@ static av_always_inline void decode_dc_coeffs(BitstreamContext *gb, int16_t *out
     code = 5;
     sign = 0;
     for (i = 1; i < blocks_per_slice; i++, out += 64) {
-        unsigned int dccb = FFMIN(code, 6U);
+        unsigned int dccb = FFMIN(code, 5U);
         DECODE_CODEWORD2(code, dc_codebook[dccb][0], dc_codebook[dccb][1],
                                dc_codebook[dccb][2], dc_codebook[dccb][3]);
         if(code) sign ^= -(code & 1);
