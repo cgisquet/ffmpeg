@@ -41,15 +41,21 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
 
     for (i = t0 = 0; t0 < num; t0++) {
         int idx0 = lut0 ? lut0[t0] : t0;
-        int l0   = len0[idx0];
-        int limit = numbits - l0;
+        int l0, limit;
+        if (idx0 == 0xFFFF)
+            continue;
+        l0 = len0[idx0];
+        limit = numbits - l0;
         if (limit <= 0 || !l0)
             continue;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             continue;
         for (t1 = 0; t1 < num; t1++) {
             int idx1 = lut1 ? lut1[t1] : t1;
-            int l1   = len1[idx1];
+            int l1;
+            if (idx1 == 0xFFFF)
+                continue;
+            l1 = len1[idx1];
             if (l1 > limit || !l1)
                 continue;
             if ((sign_extend(t1, 8) & (num-1)) != t1)

@@ -137,6 +137,7 @@ void* ff_huff_joint_alloc(int numbits);
 
 /**
  * Generate a table suitable for decoding of 2 VLCs at a time
+ * A value of 0xFFFF in the LUT is assumed to be an unpopulated entry
  * @param vlc      The VLC table
  * @param array    The array allocated by ff_huff_joint_alloc
  * @param num      Maximum symbol value
