@@ -197,25 +197,25 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
 
         prev = 0x200;
         for (j = sstart; j < send; j++) {
+            uint16_t* buf = !use_pred ? dest : c->buffer;
             for (i = 0; i < width; i++) {
                 pix = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
                 if (pix < 0) {
                     av_log(c->avctx, AV_LOG_ERROR, "Decoding error\n");
                     goto fail;
                 }
-                if (use_pred) {
-                    prev += pix;
-                    prev &= 0x3FF;
-                    pix   = prev;
-                }
-                dest[i] = pix;
+                buf[i] = pix;
             }
-            dest += stride;
             if (get_bits_left(&gb) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
                         "Slice decoding ran out of bits\n");
                 goto fail;
             }
+
+            if (use_pred)
+                c->llviddsp.add_left_pred_int16(dest, buf, 0x3FF, width, prev);
+            prev = dest[width-1];
+            dest += stride;
         }
         if (get_bits_left(&gb) > 32)
             av_log(c->avctx, AV_LOG_WARNING,
@@ -358,23 +358,24 @@ static int decode_plane(UtvideoContext *c, int plane_no,
 
         prev = 0x80;
         for (j = sstart; j < send; j++) {
+            uint8_t* buf = !use_pred ? dest : c->buffer;
             for (i = 0; i < width; i++) {
-                pix = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
+                int pix = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
                 if (pix < 0) {
                     av_log(c->avctx, AV_LOG_ERROR, "Decoding error\n");
                     goto fail;
                 }
-                if (use_pred) {
-                    prev += pix;
-                    pix   = prev;
-                }
-                dest[i] = pix;
+                buf[i] = pix;
             }
             if (get_bits_left(&gb) < 0) {
                 av_log(c->avctx, AV_LOG_ERROR,
                         "Slice decoding ran out of bits\n");
                 goto fail;
             }
+
+              if (use_pred)
+                  c->llviddsp.add_left_pred(dest, buf, width, prev);
+              prev = dest[width-1];
             dest += stride;
         }
         if (get_bits_left(&gb) > 32)
@@ -1032,6 +1033,10 @@ static av_cold int decode_init(AVCodecContext *avctx)
         return AVERROR_INVALIDDATA;
     }
 
+    c->buffer = av_malloc(avctx->width * (avctx->bits_per_raw_sample==8?1:2));
+    if (!c->buffer)
+        return AVERROR(ENOMEM);
+
     av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &h_shift, &v_shift);
     if ((avctx->width  & ((1<<h_shift)-1)) ||
         (avctx->height & ((1<<v_shift)-1))) {
@@ -1087,9 +1092,25 @@ static av_cold int decode_end(AVCodecContext *avctx)
     UtvideoContext * const c = avctx->priv_data;
 
     av_freep(&c->slice_bits);
+    av_freep(&c->buffer);
 
     return 0;
 }
+
+#if HAVE_THREADS
+static av_cold int decode_init_thread_copy(AVCodecContext *avctx)
+{
+    UtvideoContext *c = avctx->priv_data;
+
+    c->avctx = avctx;
+
+    c->buffer = av_malloc(avctx->width * (avctx->bits_per_raw_sample==8?1:2));
+    if (!c->buffer)
+        return AVERROR(ENOMEM);
+
+    return 0;
+}
+#endif
 
 AVCodec ff_utvideo_decoder = {
     .name           = "utvideo",
@@ -1102,4 +1123,5 @@ AVCodec ff_utvideo_decoder = {
     .decode         = decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    .init_thread_copy = ONLY_IF_THREADS_ENABLED(decode_init_thread_copy),
 };
