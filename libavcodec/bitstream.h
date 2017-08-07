@@ -435,7 +435,7 @@ static inline int bitstream_read_vlc(BitstreamContext *bc, VLC_TYPE (*table)[2],
         skip_remaining(bc, bits);
         code = set_idx(bc, code, &n, &nb_bits, table);
         if (max_depth > 2 && n < 0) {
-            skip_remaining(bc, nb_bits);
+            skip_remaining(bc, bits);
             code = set_idx(bc, code, &n, &nb_bits, table);
         }
     }
