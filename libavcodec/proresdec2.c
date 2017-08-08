@@ -421,7 +421,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, BitstreamCon
 
         i = pos >> log2_block_count;
 
-        sign = bitstream_read_signed(gb, 1);
+        sign = -bitstream_read_bit(gb);
         out[((pos & block_mask) << 6) + ctx->scan[i]] = ((level ^ sign) - sign);
     }
 
