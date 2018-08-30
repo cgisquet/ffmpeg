@@ -116,7 +116,7 @@ static int huff_build10(VLC *vlc, uint8_t *len)
     for (i = 1023; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 1023 - he[i].sym;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
@@ -148,7 +148,7 @@ static int huff_build12(VLC *vlc, uint8_t *len)
     for (i = 4095; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 4095 - he[i].sym;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
@@ -180,7 +180,7 @@ static int huff_build(VLC *vlc, uint8_t *len)
     for (i = 255; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
         bits[i]  = he[i].len;
-        syms[i]  = he[i].sym;
+        syms[i]  = 255 - he[i].sym;
         code += 0x80000000u >> (he[i].len - 1);
     }
 
@@ -262,7 +262,7 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                     if (pix < 0)
                         return AVERROR_INVALIDDATA;
 
-                    dst[x] = max - pix;
+                    dst[x] = pix;
                 }
                 dst += stride;
             }
@@ -392,7 +392,7 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                     if (pix < 0)
                         return AVERROR_INVALIDDATA;
 
-                    dst[x] = 255 - pix;
+                    dst[x] = pix;
                 }
                 dst += stride;
             }
