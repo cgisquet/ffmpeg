@@ -25,6 +25,9 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/qsort.h"
 
+#define CACHED_BITSTREAM_READER 1
+#define UNCHECKED_BITSTREAM_READER 1
+
 #include "avcodec.h"
 #include "bytestream.h"
 #include "get_bits.h"
