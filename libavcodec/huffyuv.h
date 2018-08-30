@@ -31,6 +31,9 @@
 
 #include <stdint.h>
 
+#define UNCHECKED_BITSTREAM_READER 1
+#define CACHED_BITSTREAM_READER 1
+
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "get_bits.h"

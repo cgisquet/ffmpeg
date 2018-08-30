@@ -30,12 +30,10 @@
  * huffyuv decoder
  */
 
-#define UNCHECKED_BITSTREAM_READER 1
-
 #include "avcodec.h"
-#include "huffjoint.h"
 #include "huffyuv.h"
 #include "huffyuvdsp.h"
+#include "huffjoint.h"
 #include "lossless_videodsp.h"
 #include "thread.h"
 #include "libavutil/imgutils.h"
