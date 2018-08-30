@@ -162,7 +162,38 @@ static inline unsigned int show_bits(GetBitContext *s, int n);
 #   define MIN_CACHE_BITS 25
 #endif
 
-#if !CACHED_BITSTREAM_READER
+#if CACHED_BITSTREAM_READER
+# define OPEN_READER_NOSIZE(name, gb)
+# define OPEN_READER(name, gb)
+# define CLOSE_READER(name, gb)
+# define UPDATE_CACHE(name, gb)
+# define BITS_LEFT(name, gb) get_bits_left(gb)
+# ifdef BITSTREAM_READER_LE
+#   define SKIP_CACHE(name, gb, num) (gb)->cache >>= (num)
+# else
+#   define SKIP_CACHE(name, gb, num) (gb)->cache <<= (num)
+# endif
+# if UNCHECKED_BITSTREAM_READER
+#   define BITS_AVAILABLE(name, gb) 1
+# else
+#   define BITS_AVAILABLE(name, gb) ((gb)->index < (gb)->size_in_bits_plus8)
+# endif
+# define SKIP_COUNTER(name, gb, num) (gb)->bits_left -= (num)
+# define SKIP_BITS(name, gb, num) skip_remaining(gb, num)
+# define LAST_SKIP_BITS(name, gb, num) skip_remaining(gb, num)
+
+# define SHOW_UBITS_LE(name, gb, num) zero_extend(show_bits(gb, num), num)
+# define SHOW_SBITS_LE(name, gb, num) sign_extend(show_bits(gb, num), num)
+
+# define SHOW_UBITS_BE(name, gb, num) NEG_USR32(show_bits(gb, num), num)
+# define SHOW_SBITS_BE(name, gb, num) NEG_SSR32(show_bits(gb, num), num)
+
+# define SHOW_UBITS(name, gb, num) show_bits(gb, num)
+# define SHOW_SBITS(name, gb, num) show_bits(gb, num)
+
+# define GET_CACHE(name, gb) (gb)->cache
+
+#else
 
 #define OPEN_READER_NOSIZE(name, gb)            \
     unsigned int name ## _index = (gb)->index;  \
