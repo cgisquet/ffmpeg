@@ -58,10 +58,44 @@
 #define CACHED_BITSTREAM_READER 0
 #endif
 
+#if CACHED_BITSTREAM_READER
+#ifndef BITSTREAM_BITS
+# if HAVE_FAST_64BIT || defined(LONG_BITSTREAM_READER)
+#   define BITSTREAM_BITS 64
+# else
+#   define BITSTREAM_BITS 32
+# endif
+#endif
+
+#if BITSTREAM_BITS == 64
+# define BITSTREAM_HBITS  32
+# define BITSTREAM_TYPE_C(a) UINT64_C(a)
+typedef uint64_t cache_type;
+# ifdef BITSTREAM_READER_LE
+#   define AV_RALL  AV_RL64
+#   define AV_RHALF AV_RL32
+# else
+#   define AV_RALL  AV_RB64
+#   define AV_RHALF AV_RB32
+# endif
+#else
+# define BITSTREAM_HBITS  16
+# define BITSTREAM_TYPE_C(a) UINT32_C(a)
+typedef uint32_t cache_type;
+# ifdef BITSTREAM_READER_LE
+#   define AV_RALL  AV_RL32
+#   define AV_RHALF AV_RL16
+# else
+#   define AV_RALL  AV_RB32
+#   define AV_RHALF AV_RB16
+# endif
+#endif
+#endif
+
 typedef struct GetBitContext {
     const uint8_t *buffer, *buffer_end;
 #if CACHED_BITSTREAM_READER
-    uint64_t cache;
+    cache_type cache;
     unsigned bits_left;
 #endif
     int index;
@@ -121,7 +155,7 @@ static inline unsigned int show_bits(GetBitContext *s, int n);
  */
 
 #if CACHED_BITSTREAM_READER
-#   define MIN_CACHE_BITS 64
+#   define MIN_CACHE_BITS BITSTREAM_BITS
 #elif defined LONG_BITSTREAM_READER
 #   define MIN_CACHE_BITS 32
 #else
@@ -226,47 +260,56 @@ static inline int get_bits_count(const GetBitContext *s)
 }
 
 #if CACHED_BITSTREAM_READER
-static inline void refill_32(GetBitContext *s)
+static inline void refill_half(GetBitContext *s)
 {
 #if !UNCHECKED_BITSTREAM_READER
     if (s->index >> 3 >= s->buffer_end - s->buffer)
         return;
 #endif
 
-#ifdef BITSTREAM_READER_LE
-    s->cache       = (uint64_t)AV_RL32(s->buffer + (s->index >> 3)) << s->bits_left | s->cache;
-#else
-    s->cache       = s->cache | (uint64_t)AV_RB32(s->buffer + (s->index >> 3)) << (32 - s->bits_left);
+#if BITSTREAM_BITS == 32
+    if (s->bits_left > 16) {
+# ifdef BITSTREAM_READER_LE
+        s->cache |= (uint32_t)s->buffer[0] << s->bits_left;
+# else
+        s->cache |= (uint32_t)s->buffer[0] << (32 - s->bits_left);
+# endif
+        s->index     += 8;
+        s->bits_left += 8;
+        return;
+    }
 #endif
-    s->index     += 32;
-    s->bits_left += 32;
+
+#ifdef BITSTREAM_READER_LE
+    s->cache     |= (cache_type)AV_RHALF(s->buffer + (s->index >> 3)) << s->bits_left;
+#else
+    s->cache     |= (cache_type)AV_RHALF(s->buffer + (s->index >> 3)) << (BITSTREAM_HBITS - s->bits_left);
+#endif
+    s->index     += BITSTREAM_HBITS;
+    s->bits_left += BITSTREAM_HBITS;
 }
 
-static inline void refill_64(GetBitContext *s)
+static inline void refill_all(GetBitContext *s)
 {
 #if !UNCHECKED_BITSTREAM_READER
     if (s->index >> 3 >= s->buffer_end - s->buffer)
         return;
 #endif
 
-#ifdef BITSTREAM_READER_LE
-    s->cache = AV_RL64(s->buffer + (s->index >> 3));
-#else
-    s->cache = AV_RB64(s->buffer + (s->index >> 3));
-#endif
-    s->index += 64;
-    s->bits_left = 64;
+    s->cache     = AV_RALL(s->buffer + (s->index >> 3));
+    s->index    += BITSTREAM_BITS;
+    s->bits_left = BITSTREAM_BITS;
 }
 
-static inline uint64_t get_val(GetBitContext *s, unsigned n, int is_le)
+static inline cache_type get_val(GetBitContext *s, unsigned n, int is_le)
 {
-    uint64_t ret;
-    av_assert2(n>0 && n<=63);
+    cache_type ret;
+    av_assert2(n>0 && n<=BITSTREAM_BITS-1);
     if (is_le) {
-        ret = s->cache & ((UINT64_C(1) << n) - 1);
+        ret = s->cache & ((BITSTREAM_TYPE_C(1) << n) - 1);
         s->cache >>= n;
     } else {
-        ret = s->cache >> (64 - n);
+        ret = s->cache >> (BITSTREAM_BITS - n);
         s->cache <<= n;
     }
     s->bits_left -= n;
@@ -276,9 +319,9 @@ static inline uint64_t get_val(GetBitContext *s, unsigned n, int is_le)
 static inline unsigned show_val(const GetBitContext *s, unsigned n)
 {
 #ifdef BITSTREAM_READER_LE
-    return s->cache & ((UINT64_C(1) << n) - 1);
+    return s->cache & ((BITSTREAM_TYPE_C(1) << n) - 1);
 #else
-    return s->cache >> (64 - n);
+    return s->cache >> (BITSTREAM_BITS - n);
 #endif
 }
 #endif
@@ -383,10 +426,10 @@ static inline unsigned int get_bits(GetBitContext *s, int n)
     register int tmp;
 #if CACHED_BITSTREAM_READER
 
-    av_assert2(n>0 && n<=32);
+    av_assert2(n>0 && n<=BITSTREAM_HBITS);
     if (n > s->bits_left) {
-        refill_32(s);
-        if (s->bits_left < 32)
+        refill_half(s);
+        if (s->bits_left < BITSTREAM_HBITS)
             s->bits_left = n;
     }
 
@@ -417,10 +460,10 @@ static av_always_inline int get_bitsz(GetBitContext *s, int n)
 static inline unsigned int get_bits_le(GetBitContext *s, int n)
 {
 #if CACHED_BITSTREAM_READER
-    av_assert2(n>0 && n<=32);
+    av_assert2(n>0 && n<=BITSTREAM_HBITS);
     if (n > s->bits_left) {
-        refill_32(s);
-        if (s->bits_left < 32)
+        refill_half(s);
+        if (s->bits_left < BITSTREAM_HBITS)
             s->bits_left = n;
     }
 
@@ -445,7 +488,7 @@ static inline unsigned int show_bits(GetBitContext *s, int n)
     register int tmp;
 #if CACHED_BITSTREAM_READER
     if (n > s->bits_left)
-        refill_32(s);
+        refill_half(s);
 
     tmp = show_val(s, n);
 #else
@@ -467,13 +510,13 @@ static inline void skip_bits(GetBitContext *s, int n)
         s->cache = 0;
         s->bits_left = 0;
 
-        if (n >= 64) {
+        if (n >= BITSTREAM_BITS) {
             unsigned skip = (n / 8) * 8;
 
             n -= skip;
             s->index += skip;
         }
-        refill_64(s);
+        refill_all(s);
         if (n)
             skip_remaining(s, n);
     }
@@ -488,7 +531,7 @@ static inline unsigned int get_bits1(GetBitContext *s)
 {
 #if CACHED_BITSTREAM_READER
     if (!s->bits_left)
-        refill_64(s);
+        refill_all(s);
 
 #ifdef BITSTREAM_READER_LE
     return get_val(s, 1, 1);
@@ -530,7 +573,7 @@ static inline void skip_bits1(GetBitContext *s)
  */
 static inline unsigned int get_bits_long(GetBitContext *s, int n)
 {
-    av_assert2(n>=0 && n<=32);
+    av_assert2(n>=0 && n<=BITSTREAM_HBITS);
     if (!n) {
         return 0;
 #if CACHED_BITSTREAM_READER
@@ -633,7 +676,7 @@ static inline int init_get_bits(GetBitContext *s, const uint8_t *buffer,
     s->index              = 0;
 
 #if CACHED_BITSTREAM_READER
-    refill_64(s);
+    refill_all(s);
 #endif
 
     return ret;
