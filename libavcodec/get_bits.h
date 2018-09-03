@@ -98,7 +98,7 @@ typedef struct GetBitContext {
     cache_type cache;
     unsigned bits_left;
 #endif
-    int index;
+    int index; // Bytes if cached bitstream reader!
     int size_in_bits;
     int size_in_bits_plus8;
 } GetBitContext;
@@ -284,7 +284,7 @@ static inline unsigned int show_bits(GetBitContext *s, int n);
 static inline int get_bits_count(const GetBitContext *s)
 {
 #if CACHED_BITSTREAM_READER
-    return s->index - s->bits_left;
+    return 8*s->index - s->bits_left;
 #else
     return s->index;
 #endif
@@ -294,7 +294,7 @@ static inline int get_bits_count(const GetBitContext *s)
 static inline void refill_half(GetBitContext *s)
 {
 #if !UNCHECKED_BITSTREAM_READER
-    if (s->index >> 3 >= s->buffer_end - s->buffer)
+    if (s->index >= s->buffer_end - s->buffer)
         return;
 #endif
 
@@ -305,30 +305,30 @@ static inline void refill_half(GetBitContext *s)
 # else
         s->cache |= (uint32_t)s->buffer[0] << (32 - s->bits_left);
 # endif
-        s->index     += 8;
+        s->index++;
         s->bits_left += 8;
         return;
     }
 #endif
 
 #ifdef BITSTREAM_READER_LE
-    s->cache     |= (cache_type)AV_RHALF(s->buffer + (s->index >> 3)) << s->bits_left;
+    s->cache     |= (cache_type)AV_RHALF(s->buffer + s->index) << s->bits_left;
 #else
-    s->cache     |= (cache_type)AV_RHALF(s->buffer + (s->index >> 3)) << (BITSTREAM_HBITS - s->bits_left);
+    s->cache     |= (cache_type)AV_RHALF(s->buffer + s->index) << (BITSTREAM_HBITS - s->bits_left);
 #endif
-    s->index     += BITSTREAM_HBITS;
+    s->index     += sizeof(s->cache)/2;
     s->bits_left += BITSTREAM_HBITS;
 }
 
 static inline void refill_all(GetBitContext *s)
 {
 #if !UNCHECKED_BITSTREAM_READER
-    if (s->index >> 3 >= s->buffer_end - s->buffer)
+    if (s->index >= s->buffer_end - s->buffer)
         return;
 #endif
 
-    s->cache     = AV_RALL(s->buffer + (s->index >> 3));
-    s->index    += BITSTREAM_BITS;
+    s->cache     = AV_RALL(s->buffer + s->index);
+    s->index    += sizeof(s->cache);
     s->bits_left = BITSTREAM_BITS;
 }
 
@@ -734,7 +734,11 @@ static inline const uint8_t *align_get_bits(GetBitContext *s)
     int n = -get_bits_count(s) & 7;
     if (n)
         skip_bits(s, n);
+#if CACHED_BITSTREAM_READER
+    return s->buffer;
+#else
     return s->buffer + (s->index >> 3);
+#endif
 }
 
 /**
