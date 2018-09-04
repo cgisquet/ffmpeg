@@ -301,9 +301,9 @@ static inline void refill_half(GetBitContext *s)
 #if BITSTREAM_BITS == 32
     if (s->bits_left > 16) {
 # ifdef BITSTREAM_READER_LE
-        s->cache |= (uint32_t)s->buffer[0] << s->bits_left;
+        s->cache |= *(uint32_t*)(s->buffer + s->index) << s->bits_left;
 # else
-        s->cache |= (uint32_t)s->buffer[0] << (32 - s->bits_left);
+        s->cache |= *(uint32_t*)(s->buffer + s->index) << (32 - s->bits_left);
 # endif
         s->index++;
         s->bits_left += 8;
