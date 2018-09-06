@@ -673,26 +673,38 @@ static void decode_422_bitstream(HYuvContext *s, int count)
                                                                            \
         if (n<=0) {                                                        \
             int nb_bits;                                                   \
-            VLC_INTERN(dst[off], table, gb, name, bits, max_depth);        \
+            SKIP_BITS(name, gb, bits);                                     \
+                                                                           \
+            nb_bits = -n;                                                  \
+            index   = SHOW_UBITS(name, gb, nb_bits) + JTable[index].code.for2; \
+            code    = JTable[index].code.for2;                             \
+            n       = JTable[index].len;                                   \
+            if (max_depth > 2 && n < 0) {                                  \
+                SKIP_BITS(name, gb, nb_bits);                              \
+                                                                           \
+                nb_bits = -n;                                              \
+                index   = SHOW_UBITS(name, gb, nb_bits) + code;            \
+                code    = JTable[index].code.for2;                         \
+                n       = JTable[index].len;                               \
+            }                                                              \
+            dst[off] = code;                                               \
             off++;                                                         \
         } else {                                                           \
             switch(JTable[index].type) {                                   \
             case 2:                                                        \
                 AV_WN32(dst+off, JTable[index].code.for4);                 \
                 off += 4;                                                  \
-                SKIP_BITS(name, gb, n);                                    \
                 break;                                                     \
             case 1:                                                        \
                 AV_WN16(dst+off, JTable[index].code.for2);                 \
                 off += 2;                                                  \
-                SKIP_BITS(name, gb, n);                                    \
                 break;                                                     \
             case 0:                                                        \
                 dst[off] = JTable[index].code.for2;                        \
                 off++;                                                     \
-                SKIP_BITS(name, gb, n);                                    \
             }                                                              \
         }                                                                  \
+        SKIP_BITS(name, gb, n);                                            \
     } while (0)
 
 #define READ_4PIX_PLANE(dst, off, plane) \
