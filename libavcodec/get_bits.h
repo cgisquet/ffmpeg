@@ -367,8 +367,24 @@ static inline void skip_remaining(GetBitContext *s, unsigned n)
 static inline int get_xbits(GetBitContext *s, int n)
 {
 #if CACHED_BITSTREAM_READER
-    int32_t cache = show_bits(s, 32);
-    int sign = ~cache >> 31;
+    int32_t cache;
+    int sign;
+
+    if (n > s->bits_left)
+#ifdef BITSTREAM_READER_LE
+        refill_half(s, 1);
+#else
+        refill_half(s, 0);
+#endif
+
+#if BITSTREAM_BITS == 32
+    cache = s->cache;
+#elif defined(BITSTREAM_READER_LE)
+    cache = s->cache & 0xFFFFFFFF;
+#else
+    cache = s->cache >> 32;
+#endif
+    sign = ~cache >> 31;
     skip_remaining(s, n);
 
     return ((((uint32_t)(sign ^ cache)) >> (32 - n)) ^ sign) - sign;
