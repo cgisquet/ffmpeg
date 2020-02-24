@@ -31,6 +31,9 @@
 
 #include <stdint.h>
 
+// Beware decoder and encoder must have the same definition for GetBitContext
+#define CACHED_BITSTREAM_READER 1
+
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "get_bits.h"
