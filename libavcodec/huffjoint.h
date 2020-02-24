@@ -24,55 +24,47 @@
 #ifndef AVCODEC_HUFF_JOINT_H
 #define AVCODEC_HUFF_JOINT_H
 
+// Beware decoder and encoder must have the same definition for GetBitContext
+#define CACHED_BITSTREAM_READER 1
+
 #include "get_bits.h"
 
 /** Subset of GET_VLC for use in hand-roller VLC code */
-#define VLC_INTERN(dst, table, gb, name, bits, max_depth)   \
+#define VLC_INTERN(dst, table, gb, bits, max_depth)         \
     code = table[index][0];                                 \
     n    = table[index][1];                                 \
     if (max_depth > 1 && n < 0) {                           \
-        LAST_SKIP_BITS(name, gb, bits);                     \
-        UPDATE_CACHE(name, gb);                             \
-                                                            \
-        nb_bits = -n;                                       \
-        index   = SHOW_UBITS(name, gb, nb_bits) + code;     \
-        code    = table[index][0];                          \
-        n       = table[index][1];                          \
+        skip_remaining(gb, bits);                           \
+        code = set_idx(gb, code, &n, &nb_bits, table);      \
         if (max_depth > 2 && n < 0) {                       \
-            LAST_SKIP_BITS(name, gb, nb_bits);              \
-            UPDATE_CACHE(name, gb);                         \
-                                                            \
-            nb_bits = -n;                                   \
-            index   = SHOW_UBITS(name, gb, nb_bits) + code; \
-            code    = table[index][0];                      \
-            n       = table[index][1];                      \
+            skip_remaining(gb, nb_bits);                    \
+            code = set_idx(gb, code, &n, &nb_bits, table);  \
         }                                                   \
     }                                                       \
     dst = code;                                             \
-    LAST_SKIP_BITS(name, gb, n)
+    skip_remaining(gb, n)
 
 /**
  * Try to read into dst0 and dst1, using operation OP, 2 symbols
  * by using joint VLC dtable, otherwise read them using table1 and
  * table2 respectively.
  */
-#define GET_VLC_DUAL(dst0, dst1, name, gb, dtable, table1, table2,  \
+#define GET_VLC_DUAL(dst0, dst1, gb, dtable, table1, table2,        \
                      bits, max_depth, OP)                           \
     do {                                                            \
-        unsigned int index = SHOW_UBITS(name, gb, bits);            \
+        unsigned int index = show_bits(gb, bits);                   \
         int          code, n = dtable[index][1];                    \
                                                                     \
         if (n<=0) {                                                 \
             int nb_bits;                                            \
-            VLC_INTERN(dst0, table1, gb, name, bits, max_depth);    \
+            VLC_INTERN(dst0, table1, gb, bits, max_depth);          \
                                                                     \
-            UPDATE_CACHE(re, gb);                                   \
-            index = SHOW_UBITS(name, gb, bits);                     \
-            VLC_INTERN(dst1, table2, gb, name, bits, max_depth);    \
+            index = show_bits(gb, bits);                            \
+            VLC_INTERN(dst1, table2, gb, bits, max_depth);          \
         } else {                                                    \
             code = dtable[index][0];                                \
             OP(dst0, dst1, code);                                   \
-            LAST_SKIP_BITS(name, gb, n);                            \
+            skip_remaining(gb, n);                                  \
         }                                                           \
     } while (0)
 
