@@ -207,7 +207,9 @@ FATE_MAGICYUV += fate-magicyuv-y4444i \
                  fate-magicyuv-y422i  \
                  fate-magicyuv-y444   \
                  fate-magicyuv-rgba   \
-                 fate-magicyuv-rgb
+                 fate-magicyuv-rgb    \
+                 fate-magicyuv-rgb10  \
+                 fate-magicyuv-rgb12
 
 FATE_VIDEO-$(call DEMDEC, AVI, MAGICYUV) += $(FATE_MAGICYUV)
 fate-magicyuv: $(FATE_MAGICYUV)
@@ -219,6 +221,8 @@ fate-magicyuv-y420:   CMD = framecrc -i $(TARGET_SAMPLES)/magy/magy_yuv420_media
 fate-magicyuv-y422i:  CMD = framecrc -i $(TARGET_SAMPLES)/magy/magy_yuv422_median_interlaced.avi
 fate-magicyuv-y4444i: CMD = framecrc -i $(TARGET_SAMPLES)/magy/magy_yuv4444_left_interlaced.avi
 fate-magicyuv-y444:   CMD = framecrc -i $(TARGET_SAMPLES)/magy/magy_yuv444_left.avi
+fate-magicyuv-rgb10:  CMD = framecrc -i $(TARGET_SAMPLES)/magy/m0rg_rgb_10b.avi
+fate-magicyuv-rgb12:  CMD = framecrc -i $(TARGET_SAMPLES)/magy/m2rg_rgb_12b.avi
 
 FATE_VIDEO-$(call DEMDEC, EA, MDEC) += fate-mdec
 fate-mdec: CMD = framecrc -idct simple -i $(TARGET_SAMPLES)/ea-dct/NFS2Esprit-partial.dct -an
