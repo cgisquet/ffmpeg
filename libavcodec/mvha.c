@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CACHED_BITSTREAM_READER !ARCH_X86_32
+#define CACHED_BITSTREAM_READER ARCH_X86
 #include "libavutil/intreadwrite.h"
 
 #include "avcodec.h"
