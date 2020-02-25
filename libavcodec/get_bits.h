@@ -522,6 +522,35 @@ static inline unsigned int show_bits(GetBitContext *s, int n)
     return tmp;
 }
 
+#if CACHED_BITSTREAM_READER && BITSTREAM_BITS == 32
+/**
+ * Show <16 bits, typically usefull for get_vlc2 cases.
+ * If refill is needed, then it's clear there is less than
+ * 16 bits left, ie a reload of 16 bits is sufficient:
+ * this is less code/faster for 32 bits
+ */
+static inline unsigned int show_bits_short(GetBitContext *s, int n)
+{
+    av_assert2(n>0 && n<16);
+#if !UNCHECKED_BITSTREAM_READER
+    if (s->index < s->buffer_end - s->buffer)
+#endif
+    if (n > s->bits_left) {
+#ifdef BITSTREAM_READER_LE
+        s->cache     |= (cache_type)AV_RL_HALF(s->buffer + s->index) << s->bits_left;
+#else
+        s->cache     |= (cache_type)AV_RB_HALF(s->buffer + s->index) << (BITSTREAM_HBITS - s->bits_left);
+#endif
+        s->index     += sizeof(s->cache)/2;
+        s->bits_left += BITSTREAM_HBITS;
+    }
+
+    return show_val(s, n);
+}
+#else
+# define show_bits_short show_bits
+#endif
+
 static inline void skip_bits(GetBitContext *s, int n)
 {
 #if CACHED_BITSTREAM_READER
@@ -841,7 +870,7 @@ static inline int set_idx(GetBitContext *s, int code, int *n, int *nb_bits,
     unsigned idx;
 
     *nb_bits = -*n;
-    idx = show_bits(s, *nb_bits) + code;
+    idx = show_bits_short(s, *nb_bits) + code;
     *n = table[idx][1];
 
     return table[idx][0];
@@ -861,7 +890,7 @@ static av_always_inline int get_vlc2(GetBitContext *s, VLC_TYPE (*table)[2],
 {
 #if CACHED_BITSTREAM_READER
     int nb_bits;
-    unsigned idx = show_bits(s, bits);
+    unsigned idx = show_bits_short(s, bits);
     int code = table[idx][0];
     int n    = table[idx][1];
 

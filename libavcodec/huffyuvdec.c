@@ -639,7 +639,7 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         if( width&1 && get_bits_left(&s->gb)>0 ) {
             unsigned int index;
             int nb_bits, code, n;
-            index = show_bits(&s->gb, VLC_BITS);
+            index = show_bits_short(&s->gb, VLC_BITS);
             VLC_INTERN(s->temp[0][width-1], s->vlc[plane].table,
                        &s->gb, VLC_BITS, 3);
         }
@@ -656,7 +656,7 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         if( width&1 && get_bits_left(&s->gb)>0 ) {
             unsigned int index;
             int nb_bits, code, n;
-            index = show_bits(&s->gb, VLC_BITS);
+            index = show_bits_short(&s->gb, VLC_BITS);
             VLC_INTERN(s->temp16[0][width-1], s->vlc[plane].table,
                        &s->gb, VLC_BITS, 3);
         }
@@ -702,7 +702,7 @@ static av_always_inline void decode_bgr_1(HYuvContext *s, int count,
         unsigned int index;
         int code, n, nb_bits;
 
-        index = show_bits(&s->gb, VLC_BITS);
+        index = show_bits_short(&s->gb, VLC_BITS);
         n     = s->vlc[4].table[index][1];
 
         if (n>0) {
@@ -714,28 +714,28 @@ static av_always_inline void decode_bgr_1(HYuvContext *s, int count,
                 VLC_INTERN(s->temp[0][4 * i + G], s->vlc[1].table,
                            &s->gb, VLC_BITS, 3);
 
-                index = show_bits(&s->gb, VLC_BITS);
+                index = show_bits_short(&s->gb, VLC_BITS);
                 VLC_INTERN(code, s->vlc[0].table, &s->gb, VLC_BITS, 3);
                 s->temp[0][4 * i + B] = code + s->temp[0][4 * i + G];
 
-                index = show_bits(&s->gb, VLC_BITS);
+                index = show_bits_short(&s->gb, VLC_BITS);
                 VLC_INTERN(code, s->vlc[2].table, &s->gb, VLC_BITS, 3);
                 s->temp[0][4 * i + R] = code + s->temp[0][4 * i + G];
             } else {
                 VLC_INTERN(s->temp[0][4 * i + B], s->vlc[0].table,
                            &s->gb, VLC_BITS, 3);
 
-                index = show_bits(&s->gb, VLC_BITS);
+                index = show_bits_short(&s->gb, VLC_BITS);
                 VLC_INTERN(s->temp[0][4 * i + G], s->vlc[1].table,
                            &s->gb, VLC_BITS, 3);
 
-                index = show_bits(&s->gb, VLC_BITS);
+                index = show_bits_short(&s->gb, VLC_BITS);
                 VLC_INTERN(s->temp[0][4 * i + R], s->vlc[2].table,
                            &s->gb, VLC_BITS, 3);
             }
         }
         if (alpha) {
-            index = show_bits(&s->gb, VLC_BITS);
+            index = show_bits_short(&s->gb, VLC_BITS);
             VLC_INTERN(s->temp[0][4 * i + A], s->vlc[2].table,
                        &s->gb, VLC_BITS, 3);
         } else

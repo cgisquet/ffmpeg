@@ -52,14 +52,14 @@
 #define GET_VLC_DUAL(dst0, dst1, gb, dtable, table1, table2,        \
                      bits, max_depth, OP)                           \
     do {                                                            \
-        unsigned int index = show_bits(gb, bits);                   \
+        unsigned int index = show_bits_short(gb, bits);             \
         int          code, n = dtable[index][1];                    \
                                                                     \
         if (n<=0) {                                                 \
             int nb_bits;                                            \
             VLC_INTERN(dst0, table1, gb, bits, max_depth);          \
                                                                     \
-            index = show_bits(gb, bits);                            \
+            index = show_bits_short(gb, bits);                      \
             VLC_INTERN(dst1, table2, gb, bits, max_depth);          \
         } else {                                                    \
             code = dtable[index][0];                                \
