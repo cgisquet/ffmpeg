@@ -632,21 +632,44 @@ static inline void skip_bits1(GetBitContext *s)
  */
 static inline unsigned int get_bits_long(GetBitContext *s, int n)
 {
+    unsigned ret = 0;
     av_assert2(n>=0 && n<=32);
     if (!n) {
         return 0;
 #if CACHED_BITSTREAM_READER
     }
-    return get_bits(s, n);
+
+# ifdef BITSTREAM_READER_LE
+    unsigned left = 0;
+# endif
+    if (n > s->bits_left) {
+        n -= s->bits_left;
+# ifdef BITSTREAM_READER_LE
+        left = s->bits_left;
+        ret = get_val(s, s->bits_left, 1);
+        refill_all(s, 1);
+# else
+        ret = get_val(s, s->bits_left, 0);
+        refill_all(s, 0);
+# endif
+    }
+
+#ifdef BITSTREAM_READER_LE
+    ret = get_val(s, n, 1) << left | ret;
+#else
+    ret = get_val(s, n, 0) | ret << n;
+#endif
+
+    return ret;
 #else
     } else if (n <= MIN_CACHE_BITS) {
         return get_bits(s, n);
     } else {
 #ifdef BITSTREAM_READER_LE
-        unsigned ret = get_bits(s, 16);
+        ret = get_bits(s, 16);
         return ret | (get_bits(s, n - 16) << 16);
 #else
-        unsigned ret = get_bits(s, 16) << (n - 16);
+        ret = get_bits(s, 16) << (n - 16);
         return ret | get_bits(s, n - 16);
 #endif
     }
