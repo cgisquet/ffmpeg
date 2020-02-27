@@ -30,7 +30,8 @@
 #include "blockdsp.h"
 #define  CACHED_BITSTREAM_READER 1
 #define  UNCHECKED_BITSTREAM_READER 1
-#include "get_bits.h"
+#include "huffjoint.h"
+//#include "get_bits.h"
 #include "dnxhddata.h"
 #include "idctdsp.h"
 #include "internal.h"
@@ -62,7 +63,7 @@ typedef struct DNXHDContext {
     uint32_t mb_scan_index[512];
     int data_offset;                    // End of mb_scan_index, where macroblocks start
     int cur_field;                      ///< current interlaced field
-    VLC ac_vlc, dc_vlc, run_vlc;
+    VLC ac_vlc, dc_vlc, run_vlc, joint_vlc;
     IDCTDSPContext idsp;
     ScanTable scantable;
     const CIDEntry *cid_table;
@@ -114,7 +115,11 @@ static av_cold int dnxhd_decode_init(AVCodecContext *avctx)
 static int dnxhd_init_vlc(DNXHDContext *ctx, uint32_t cid, int bitdepth)
 {
     if (cid != ctx->cid) {
+        uint16_t *jsym = ff_huff_joint_alloc(DNXHD_VLC_BITS);
         int index;
+
+        if (!jsym)
+            return AVERROR(ENOMEM);
 
         if ((index = ff_dnxhd_get_cid_table(cid)) < 0) {
             av_log(ctx->avctx, AV_LOG_ERROR, "unsupported cid %"PRIu32"\n", cid);
@@ -131,6 +136,7 @@ static int dnxhd_init_vlc(DNXHDContext *ctx, uint32_t cid, int bitdepth)
         ff_free_vlc(&ctx->ac_vlc);
         ff_free_vlc(&ctx->dc_vlc);
         ff_free_vlc(&ctx->run_vlc);
+        ff_free_vlc(&ctx->joint_vlc);
 
         init_vlc(&ctx->ac_vlc, DNXHD_VLC_BITS, 257,
                  ctx->cid_table->ac_bits, 1, 1,
@@ -141,6 +147,15 @@ static int dnxhd_init_vlc(DNXHDContext *ctx, uint32_t cid, int bitdepth)
         init_vlc(&ctx->run_vlc, DNXHD_RUN_BITS, 62,
                  ctx->cid_table->run_bits, 1, 1,
                  ctx->cid_table->run_codes, 2, 2, 0);
+
+        if (ff_huff_joint_gen(&ctx->joint_vlc, jsym, DNXHD_VLC_BITS,
+                              ctx->cid_table->run_codes, 256, 2,
+                              ctx->cid_table->ac_codes, 64, 2,
+                              ctx->cid_table->run_bits, ctx->cid_table->ac_bits,
+                              NULL, NULL)) {
+            av_freep(&jsym);
+            return AVERROR_INVALIDDATA;
+        }
 
         ctx->cid = cid;
     }
@@ -421,8 +436,11 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
         }
 
         if (flags & 2) {
-            index2 = get_vlc2(&row->gb, ctx->run_vlc.table, DNXHD_RUN_BITS, 1);
+            GET_VLC_DUAL(index2, index1, &row->gb, ctx->joint_vlc.table,
+                         ctx->run_vlc.table, ctx->ac_vlc.table, DNXHD_VLC_BITS, 3, OP8bits);
             i += ctx->cid_table->run[index2];
+        } else {
+            index1 = get_vlc2(&row->gb, ctx->ac_vlc.table, DNXHD_VLC_BITS, 2);
         }
 
         if (++i > 63) {
@@ -439,8 +457,6 @@ static av_always_inline int dnxhd_decode_dct_block(const DNXHDContext *ctx,
         level >>= level_shift;
 
         block[j] = (level ^ sign) - sign;
-
-        index1 = get_vlc2(&row->gb, ctx->ac_vlc.table, DNXHD_VLC_BITS, 2);
     }
 error:
     return ret;
@@ -714,6 +730,7 @@ static av_cold int dnxhd_decode_close(AVCodecContext *avctx)
     ff_free_vlc(&ctx->ac_vlc);
     ff_free_vlc(&ctx->dc_vlc);
     ff_free_vlc(&ctx->run_vlc);
+    ff_free_vlc(&ctx->joint_vlc);
 
     av_freep(&ctx->rows);
 

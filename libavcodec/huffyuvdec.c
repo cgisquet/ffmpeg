@@ -127,9 +127,8 @@ static int generate_joint_tables(HYuvContext *s)
         int p;
         for (p = 0; p < count; p++) {
             int p0 = s->version > 2 ? p : 0;
-            if (ff_huff_joint_gen(&s->vlc[4 + p], symbols,
-                                  s->vlc_n, VLC_BITS,
-                                  s->bits[p0], s->bits[p],
+            if (ff_huff_joint_gen(&s->vlc[4 + p], symbols, VLC_BITS,
+                                  s->bits[p0], s->vlc_n, 4, s->bits[p], s->vlc_n, 4,
                                   s->len[p0], s->len[p], NULL, NULL))
                 goto out;
         }

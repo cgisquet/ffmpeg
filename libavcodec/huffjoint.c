@@ -28,8 +28,9 @@ void* ff_huff_joint_alloc(int numbits)
     return av_mallocz(5 << numbits);
 }
 
-int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
-                      const uint32_t* bits0, const uint32_t* bits1,
+int ff_huff_joint_gen(VLC *vlc, void *array, int numbits,
+                      const void* bits0, int num0, int size0,
+                      const void* bits1, int num1, int size1,
                       const uint8_t* len0, const uint8_t* len1,
                       const uint16_t* lut0, const uint16_t* lut1)
 {
@@ -38,7 +39,7 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
     uint8_t  *len     = (uint8_t *)(bits + (1 << numbits));
     int i, t0, t1;
 
-    for (i = t0 = 0; t0 < num; t0++) {
+    for (i = t0 = 0; t0 < num0; t0++) {
         int idx0 = lut0 ? lut0[t0] : t0;
         int l0, limit;
         if (idx0 == 0xFFFF)
@@ -47,21 +48,29 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
         limit = numbits - l0;
         if (limit <= 0 || !l0)
             continue;
-        if ((sign_extend(t0, 8) & (num-1)) != t0)
+        if ((sign_extend(t0, 8) & (num0-1)) != t0)
             continue;
-        for (t1 = 0; t1 < num; t1++) {
+        for (t1 = 0; t1 < num1; t1++) {
             int idx1 = lut1 ? lut1[t1] : t1;
             int l1;
+            unsigned current;
             if (idx1 == 0xFFFF)
                 continue;
             l1 = len1[idx1];
             if (l1 > limit || !l1)
                 continue;
-            if ((sign_extend(t1, 8) & (num-1)) != t1)
+            if ((sign_extend(t1, 8) & (num1-1)) != t1)
                 continue;
             av_assert0(i < (1 << numbits));
             len[i]     = l0 + l1;
-            bits[i]    = (bits0[idx0] << l1) + bits1[idx1];
+#if 1
+            current = ((uint32_t*)bits0)[idx0];
+            bits[i]    = (current << l1) + ((uint32_t*)bits1)[idx1];
+#else
+            current = (size0==4) ? ((uint32_t*)bits0)[idx0] : ((uint16_t*)bits0)[idx0];
+            bits[i]    = (current << l1) +
+                         ((size1==4) ? ((uint32_t*)bits1)[idx1] : ((uint16_t*)bits1)[idx1]);
+#endif
             symbols[i] = (t0 << 8) + (t1 & 0xFF);
                 i++;
         }

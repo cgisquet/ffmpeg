@@ -86,17 +86,21 @@ void* ff_huff_joint_alloc(int numbits);
  * A value of 0xFFFF in the LUT is assumed to be an unpopulated entry
  * @param vlc      The VLC table
  * @param array    The array allocated by ff_huff_joint_alloc
- * @param num      Maximum symbol value
  * @param numbits  Value passed to ff_huff_joint_alloc
  * @param bits0    Codewords for 1st element of pair
+ * @param num0     Maximum symbol value for first element
+ * @param size0    Size of the first element codewords
  * @param bits1    Codewords for 2nd element of pair
+ * @param num1     Maximum symbol value for second element
+ * @param size1    Size of the second element codewords
  * @param len0     Codeword lengths for 1st element of pair
  * @param len1     Codeword lengths for 2nd element of pair
  * @param lut0     LUT (NULL for same) for value to index of 1st element
  * @param lut1     LUT (NULL for same) for value to index of 2nd element
  */
-int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
-                      const uint32_t* bits0, const uint32_t* bits1,
+int ff_huff_joint_gen(VLC *vlc, void *array, int numbits,
+                      const void* bits0, int num0, int size0,
+                      const void* bits1, int num1, int size1,
                       const uint8_t* len0, const uint8_t* len1,
                       const uint16_t* lut0, const uint16_t* lut1);
 

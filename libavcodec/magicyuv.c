@@ -128,8 +128,9 @@ static int huff_build10(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
     }
 
     // generate joint table
-    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut)) {
+    if (ff_huff_joint_gen(jvlc, jsym, VLC_BITS,
+                          codes, mask, sizeof(*codes), codes, mask, sizeof(*codes),
+                          bits, bits, lut, lut)) {
         av_freep(&jsym);
         return AVERROR_INVALIDDATA;
     }
@@ -173,8 +174,9 @@ static int huff_build12(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
     }
 
     // generate joint table
-    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut)) {
+    if (ff_huff_joint_gen(jvlc, jsym, VLC_BITS,
+                          codes, mask, sizeof(*codes), codes, mask, sizeof(*codes),
+                          bits, bits, lut, lut)) {
         av_freep(&jsym);
         return AVERROR_INVALIDDATA;
     }
@@ -218,8 +220,9 @@ static int huff_build(VLC *vlc, VLC *jvlc, uint8_t *len, int mask)
     }
 
     // generate joint table
-    if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut)) {
+    if (ff_huff_joint_gen(jvlc, jsym, VLC_BITS,
+                          codes, mask, 4, codes, mask, 4,
+                          bits, bits, lut, lut)) {
         av_freep(&jsym);
         return AVERROR_INVALIDDATA;
     }
