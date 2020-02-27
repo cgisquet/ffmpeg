@@ -260,29 +260,35 @@ static inline int get_bits_count(const GetBitContext *s)
 #if CACHED_BITSTREAM_READER
 static inline void refill_half(GetBitContext *s, int is_le)
 {
+
+#if BITSTREAM_BITS == 32
+    const uint8_t *ptr = s->ptr;
+    int c = BITSTREAM_BITS - s->bits_left - 8;
+    uint32_t cache = s->cache;
+#if UNCHECKED_BITSTREAM_READER
+    while (c >= 0) {
+#else
+    while (c >= 0 && s->ptr < s->buffer_end) {
+#endif
+        cache |= ((uint32_t)*ptr++) << c;
+        c -= 8;
+    }
+    s->cache = cache;
+    s->bits_left = BITSTREAM_BITS - c - 8;
+    s->ptr = ptr;
+#else
 #if !UNCHECKED_BITSTREAM_READER
     if (s->ptr >= s->buffer_end)
         return;
 #endif
 
-#if BITSTREAM_BITS == 32
-    if (s->bits_left > 16) {
-        if (is_le)
-        s->cache |= (uint32_t)s->ptr[0] << s->bits_left;
-        else
-        s->cache |= (uint32_t)s->ptr[0] << (32 - s->bits_left);
-        s->ptr++;
-        s->bits_left += 8;
-        return;
-    }
-#endif
-
     if (is_le)
-    s->cache       |= (cache_type)AV_RL_HALF(s->ptr) << s->bits_left;
+    s->cache     |= (cache_type)AV_RL32(s->ptr) << s->bits_left;
     else
-    s->cache       |= (cache_type)AV_RB_HALF(s->ptr) << (BITSTREAM_HBITS - s->bits_left);
-    s->ptr       += sizeof(s->cache)/2;
-    s->bits_left += BITSTREAM_HBITS;
+    s->cache     |= (cache_type)AV_RB32(s->ptr) << (32 - s->bits_left);
+    s->ptr       += 4;
+    s->bits_left += 32;
+#endif
 }
 
 static inline void refill_all(GetBitContext *s, int is_le)
