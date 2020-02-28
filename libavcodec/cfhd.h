@@ -30,7 +30,8 @@
 #include "get_bits.h"
 #include "vlc.h"
 
-#define VLC_BITS      10
+#define VLC9_BITS     14
+#define VLC18_BITS    12
 #define SUBBAND_COUNT 10
 
 typedef struct CFHD_RL_VLC_ELEM {
@@ -38,6 +39,13 @@ typedef struct CFHD_RL_VLC_ELEM {
     int8_t len;
     uint16_t run;
 } CFHD_RL_VLC_ELEM;
+
+typedef struct CFHD_DUAL_RL_ELEM {
+    int16_t level1;
+    uint16_t run1;
+    int16_t level2;
+    uint16_t run2;
+} CFHD_DUAL_RL_ELEM;
 
 #define DWT_LEVELS 3
 
@@ -78,11 +86,13 @@ typedef struct Peak {
 typedef struct CFHDContext {
     AVCodecContext *avctx;
 
-    CFHD_RL_VLC_ELEM table_9_rl_vlc[3254];
-    VLC vlc_9;
+    CFHD_RL_VLC_ELEM table_9_rl_vlc[24748];
+    CFHD_DUAL_RL_ELEM joint9[504];
+    VLC vlc_9, joint_vlc_9;
 
-    CFHD_RL_VLC_ELEM table_18_rl_vlc[5966];
-    VLC vlc_18;
+    CFHD_RL_VLC_ELEM table_18_rl_vlc[21886];
+    CFHD_DUAL_RL_ELEM joint18[235];
+    VLC vlc_18, joint_vlc_18;
 
     GetBitContext gb;
 

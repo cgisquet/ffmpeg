@@ -380,34 +380,71 @@ static int alloc_buffers(AVCodecContext *avctx)
     return 0;
 }
 
-#define GET_RL_VLC2(level, run, gb, table)                      \
-    do {                                                        \
-        int n, nb_bits;                                         \
-        unsigned int index;                                     \
-                                                                \
-        index = show_bits(gb, VLC_BITS);                        \
-        level = table[index].level;                             \
-        n     = table[index].len;                               \
-                                                                \
-        if (n < 0) {                                            \
-            skip_remaining(gb, VLC_BITS);                       \
-            nb_bits = -n;                                       \
-                                                                \
-            index = show_bits(gb, nb_bits) + level;             \
-            level = table[index].level;                         \
-            n     = table[index].len;                           \
-            if (n < 0) {                                        \
-                skip_remaining(gb, VLC_BITS);                   \
-                nb_bits = -n;                                   \
-                                                                \
-                index = show_bits(gb, nb_bits) + level;         \
-                level = table[index].level;                     \
-                n     = table[index].len;                       \
-            }                                                   \
-        }                                                       \
-        run = table[index].run;                                 \
-        skip_remaining(gb, n);                                  \
-    } while (0)
+#define GET_RL_VLC2(level1, run1, level2, run2, gb, jtable, \
+                    table, dual, VLC_BITS, THIRD, BREAK_COND)\
+    index = show_bits(gb, VLC_BITS);                        \
+    n = jtable[index][1];                                   \
+                                                            \
+    if (n <= 0) { /* switch to RL_VLC */                    \
+        level1 = table[index].level;                        \
+        n      = table[index].len;                          \
+        if (n < 0) {                                        \
+            int nb_bits = -n;                               \
+            skip_remaining(gb, VLC_BITS);                   \
+                                                            \
+            index = show_bits(gb, nb_bits) + level1;        \
+            level1 = table[index].level;                    \
+            n     = table[index].len;                       \
+            if (THIRD && n < 0) {                           \
+                skip_remaining(gb, VLC_BITS);               \
+                nb_bits = -n;                               \
+                                                            \
+                index = show_bits(gb, nb_bits) + level1;    \
+                level1 = table[index].level;                \
+                n     = table[index].len;                   \
+            }                                               \
+        }                                                   \
+        run1 = table[index].run;                            \
+        skip_remaining(gb, n);                              \
+        /* escape */                                        \
+        if (BREAK_COND(level1, run1)) break;                \
+        count += run1;                                      \
+        if (count > expected) break;                        \
+                                                            \
+        index = show_bits(gb, VLC_BITS);                    \
+        level2 = table[index].level;                        \
+        n      = table[index].len;                          \
+        if (n < 0) {                                        \
+            int nb_bits = -n;                               \
+            skip_remaining(gb, VLC_BITS);                   \
+                                                            \
+            index = show_bits(gb, nb_bits) + level2;        \
+            level2 = table[index].level;                    \
+            n     = table[index].len;                       \
+            if (n < 0) {                                    \
+                skip_remaining(gb, VLC_BITS);               \
+                nb_bits = -n;                               \
+                                                            \
+                index = show_bits(gb, nb_bits) + level2;    \
+                level2 = table[index].level;                \
+                n     = table[index].len;                   \
+            }                                               \
+        }                                                   \
+        run2 = table[index].run;                            \
+        skip_remaining(gb, n);                              \
+    } else {                                                \
+        skip_remaining(gb, n);                              \
+        code = jtable[index][0];                            \
+        level1 = dual[code].level1;                         \
+        run1 = dual[code].run1;                             \
+        /* escape */                                        \
+        if (BREAK_COND(level1, run1)) break;                \
+        count += run1;                                      \
+        if (count > expected) break;                        \
+                                                            \
+        level2 = dual[code].level2;                         \
+        run2 = dual[code].run2;                             \
+    }
 
 static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                        AVPacket *avpkt)
@@ -723,7 +760,6 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
             int highpass_stride = s->plane[s->channel_num].band[s->level][s->subband_num].stride;
             int expected;
             int a_expected = highpass_a_height * highpass_a_width;
-            int level, run, coeff;
             int count = 0, bytes;
 
             if (!got_buffer) {
@@ -743,38 +779,52 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
 
             init_get_bits(&s->gb, gb.buffer, bytestream2_get_bytes_left(&gb) * 8);
             {
+                int level1, run1, level2, run2, n, coeff, code;
+                unsigned index;
                 if (!s->codebook) {
                     while (1) {
-                        GET_RL_VLC2(level, run, &s->gb, s->table_9_rl_vlc);
+                        #define COND9(lvl, run) (lvl == 64)
+                        GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
+                                    s->joint_vlc_9.table, s->table_9_rl_vlc,
+                                    s->joint9, VLC9_BITS, 0, COND9);
+                        coeff = dequant_and_decompand(level1, s->quantisation, 0);
+                        for (i = 0; i < run1; i++)
+                            *coeff_data++ = coeff;
 
                         /* escape */
-                        if (level == 64)
+                        if (COND9(level2, run2))
                             break;
 
-                        count += run;
+                        count += run2;
 
                         if (count > expected)
                             break;
 
-                        coeff = dequant_and_decompand(level, s->quantisation, 0);
-                        for (i = 0; i < run; i++)
+                        coeff = dequant_and_decompand(level2, s->quantisation, 0);
+                        for (i = 0; i < run2; i++)
                             *coeff_data++ = coeff;
                     }
                 } else {
                     while (1) {
-                        GET_RL_VLC2(level, run, &s->gb, s->table_18_rl_vlc);
+                        #define COND18(lvl, run) (lvl == 255 && run == 2)
+                        GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
+                                    s->joint_vlc_18.table, s->table_18_rl_vlc,
+                                    s->joint18, VLC18_BITS, 1, COND18);
+                        coeff = dequant_and_decompand(level1, s->quantisation, s->codebook);
+                        for (i = 0; i < run1; i++)
+                            *coeff_data++ = coeff;
 
                         /* escape */
-                        if (level == 255 && run == 2)
+                        if (COND18(level2, run2))
                             break;
 
-                        count += run;
+                        count += run2;
 
                         if (count > expected)
                             break;
 
-                        coeff = dequant_and_decompand(level, s->quantisation, s->codebook);
-                        for (i = 0; i < run; i++)
+                        coeff = dequant_and_decompand(level2, s->quantisation, s->codebook);
+                        for (i = 0; i < run2; i++)
                             *coeff_data++ = coeff;
                     }
                 }
@@ -1066,6 +1116,8 @@ static av_cold int cfhd_close(AVCodecContext *avctx)
     if (!avctx->internal->is_copy) {
         ff_free_vlc(&s->vlc_9);
         ff_free_vlc(&s->vlc_18);
+        ff_free_vlc(&s->joint_vlc_9);
+        ff_free_vlc(&s->joint_vlc_18);
     }
 
     return 0;
