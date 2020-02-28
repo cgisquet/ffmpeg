@@ -28,9 +28,8 @@
 #include <inttypes.h>
 
 #include "avcodec.h"
-#include "get_bits.h"
 #include "mathops.h"
-#include "lagarithrac.h"
+#include "lagarithrac.h" // includes get_bits.h
 #include "lossless_videodsp.h"
 #include "thread.h"
 
