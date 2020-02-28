@@ -32,6 +32,7 @@
 
 #include "avcodec.h"
 #include "bytestream.h"
+#define CACHED_BITSTREAM_READER 1
 #include "get_bits.h"
 #include "internal.h"
 #include "thread.h"
@@ -379,6 +380,35 @@ static int alloc_buffers(AVCodecContext *avctx)
     return 0;
 }
 
+#define GET_RL_VLC2(level, run, gb, table)                      \
+    do {                                                        \
+        int n, nb_bits;                                         \
+        unsigned int index;                                     \
+                                                                \
+        index = show_bits(gb, VLC_BITS);                        \
+        level = table[index].level;                             \
+        n     = table[index].len;                               \
+                                                                \
+        if (n < 0) {                                            \
+            skip_remaining(gb, VLC_BITS);                       \
+            nb_bits = -n;                                       \
+                                                                \
+            index = show_bits(gb, nb_bits) + level;             \
+            level = table[index].level;                         \
+            n     = table[index].len;                           \
+            if (n < 0) {                                        \
+                skip_remaining(gb, VLC_BITS);                   \
+                nb_bits = -n;                                   \
+                                                                \
+                index = show_bits(gb, nb_bits) + level;         \
+                level = table[index].level;                     \
+                n     = table[index].len;                       \
+            }                                                   \
+        }                                                       \
+        run = table[index].run;                                 \
+        skip_remaining(gb, n);                                  \
+    } while (0)
+
 static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                        AVPacket *avpkt)
 {
@@ -713,12 +743,9 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
 
             init_get_bits(&s->gb, gb.buffer, bytestream2_get_bytes_left(&gb) * 8);
             {
-                OPEN_READER(re, &s->gb);
                 if (!s->codebook) {
                     while (1) {
-                        UPDATE_CACHE(re, &s->gb);
-                        GET_RL_VLC(level, run, re, &s->gb, s->table_9_rl_vlc,
-                                   VLC_BITS, 3, 1);
+                        GET_RL_VLC2(level, run, &s->gb, s->table_9_rl_vlc);
 
                         /* escape */
                         if (level == 64)
@@ -735,9 +762,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                     }
                 } else {
                     while (1) {
-                        UPDATE_CACHE(re, &s->gb);
-                        GET_RL_VLC(level, run, re, &s->gb, s->table_18_rl_vlc,
-                                   VLC_BITS, 3, 1);
+                        GET_RL_VLC2(level, run, &s->gb, s->table_18_rl_vlc);
 
                         /* escape */
                         if (level == 255 && run == 2)
@@ -753,7 +778,6 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                             *coeff_data++ = coeff;
                     }
                 }
-                CLOSE_READER(re, &s->gb);
             }
 
             if (count > expected) {
