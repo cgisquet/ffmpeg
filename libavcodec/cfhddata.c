@@ -275,11 +275,15 @@ static const uint8_t table_18_vlc_level[NB_VLC_TABLE_18] = {
 
 av_cold int ff_cfhd_init_vlcs(CFHDContext *s)
 {
-    int i, j, ret = 0;
+    int i, j, idx0, idx1, total, ret = 0;
     uint32_t new_cfhd_vlc_bits[NB_VLC_TABLE_18 * 2];
     uint8_t  new_cfhd_vlc_len[NB_VLC_TABLE_18 * 2];
     uint16_t new_cfhd_vlc_run[NB_VLC_TABLE_18 * 2];
     int16_t  new_cfhd_vlc_level[NB_VLC_TABLE_18 * 2];
+    uint16_t joint_bits[1<<VLC9_BITS];
+    uint8_t joint_lens[1<<VLC9_BITS];
+    memset(joint_bits, 0, sizeof(joint_bits));
+    memset(joint_lens, 0, sizeof(joint_lens));
 
     /** Similar to dv.c, generate signed VLC tables **/
 
@@ -303,10 +307,42 @@ av_cold int ff_cfhd_init_vlcs(CFHDContext *s)
         }
     }
 
-    ret = init_vlc(&s->vlc_9, VLC_BITS, j, new_cfhd_vlc_len,
+    ret = init_vlc(&s->vlc_9, VLC9_BITS, j, new_cfhd_vlc_len,
                    1, 1, new_cfhd_vlc_bits, 4, 4, 0);
     if (ret < 0)
         return ret;
+
+    /* Joint 9 */
+    memset(joint_bits, 0, sizeof(joint_bits));
+    memset(joint_lens, 0, sizeof(joint_lens));
+    for (total = idx0 = 0; idx0 < j; idx0++) {
+        int l0 = new_cfhd_vlc_len[idx0];
+        int limit = VLC9_BITS - l0;
+        if (limit <= 0)
+            continue;
+        for (idx1 = 0; idx1 < j; idx1++) {
+            int l1;
+            l1 = new_cfhd_vlc_len[idx1];
+            if (l1 > limit)
+                continue;
+            joint_lens[total] = l0 + l1;
+            joint_bits[total] = (new_cfhd_vlc_bits[idx0] << l1) + new_cfhd_vlc_bits[idx1];
+            s->joint9[total]  = (CFHD_DUAL_RL_ELEM)
+                                { .level1 = new_cfhd_vlc_level[idx0],
+                                  .run1   = new_cfhd_vlc_run[idx0],
+                                  .level2 = new_cfhd_vlc_level[idx1],
+                                  .run2   = new_cfhd_vlc_run[idx1] };
+            total++;
+        }
+    }
+    av_log(NULL, AV_LOG_DEBUG, "cfhd tables needed sizes: 9=%u j9=%u\n",
+           s->vlc_9.table_size, total);
+    ret = ff_init_vlc_sparse(&s->joint_vlc_9, VLC9_BITS, total,
+                             joint_lens, 1, 1, joint_bits, 2, 2, NULL, 0, 0, 0);
+    if (ret < 0)
+        return ret;
+
+
     for (i = 0; i < s->vlc_9.table_size; i++) {
         int code = s->vlc_9.table[i][0];
         int len  = s->vlc_9.table[i][1];
@@ -344,8 +380,36 @@ av_cold int ff_cfhd_init_vlcs(CFHDContext *s)
         }
     }
 
-    ret = init_vlc(&s->vlc_18, VLC_BITS, j, new_cfhd_vlc_len,
+    ret = init_vlc(&s->vlc_18, VLC18_BITS, j, new_cfhd_vlc_len,
                    1, 1, new_cfhd_vlc_bits, 4, 4, 0);
+    if (ret < 0)
+        return ret;
+
+    /* Joint 18 */
+    memset(joint_bits, 0, sizeof(joint_bits));
+    memset(joint_lens, 0, sizeof(joint_lens));
+    for (total = idx0 = 0; idx0 < j; idx0++) {
+        int l0 = new_cfhd_vlc_len[idx0];
+        int limit = VLC18_BITS - l0;
+        if (limit <= 0)
+            continue;
+        for (idx1 = 0; idx1 < j; idx1++) {
+            int l1;
+            l1 = new_cfhd_vlc_len[idx1];
+            if (l1 > limit)
+                continue;
+            joint_lens[total] = l0 + l1;
+            joint_bits[total] = (new_cfhd_vlc_bits[idx0] << l1) + new_cfhd_vlc_bits[idx1];
+            s->joint18[total] = (CFHD_DUAL_RL_ELEM)
+                                { .level1 = new_cfhd_vlc_level[idx0], .run1 = new_cfhd_vlc_run[idx0],
+                                  .level2 = new_cfhd_vlc_level[idx1], .run2 = new_cfhd_vlc_run[idx1] };
+            total++;
+        }
+    }
+    av_log(NULL, AV_LOG_DEBUG, "cfhd tables needed sizes: 18=%u j18=%u\n",
+           s->vlc_18.table_size, total);
+    ret = ff_init_vlc_sparse(&s->joint_vlc_18, VLC18_BITS, total,
+                             joint_lens, 1, 1, joint_bits, 2, 2, NULL, 0, 0, 0);
     if (ret < 0)
         return ret;
 
