@@ -124,6 +124,10 @@ typedef struct CFHDContext {
     uint8_t prescale_shift[3];
     Plane plane[4];
     Peak peak;
+
+    uint16_t oldquant;
+    int oldcb;
+    int16_t dequant[2*263+1];
 } CFHDContext;
 
 int ff_cfhd_init_vlcs(CFHDContext *s);
