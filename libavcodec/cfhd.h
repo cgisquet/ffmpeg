@@ -37,7 +37,7 @@
 typedef struct CFHD_RL_VLC_ELEM {
     int16_t level;
     int8_t len;
-    uint16_t run;
+    int16_t run;
 } CFHD_RL_VLC_ELEM;
 
 typedef struct CFHD_DUAL_RL_ELEM {

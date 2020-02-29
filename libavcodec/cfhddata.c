@@ -304,6 +304,8 @@ av_cold int ff_cfhd_init_vlcs(CFHDContext *s)
             new_cfhd_vlc_len[j]   =  table_9_vlc_len[i] + 1;
             new_cfhd_vlc_run[j]   =  table_9_vlc_run[i];
             new_cfhd_vlc_level[j] = -table_9_vlc_level[i];
+        } else if (table_9_vlc_level[i] == 64) {
+            new_cfhd_vlc_run[j] = -1; // escape code
         }
     }
 
@@ -377,6 +379,8 @@ av_cold int ff_cfhd_init_vlcs(CFHDContext *s)
             new_cfhd_vlc_len[j]   =  table_18_vlc_len[i] + 1;
             new_cfhd_vlc_run[j]   =  table_18_vlc_run[i];
             new_cfhd_vlc_level[j] = -table_18_vlc_level[i];
+        } else if (table_18_vlc_level[i] == 255 && table_18_vlc_run[i] == 2) {
+            new_cfhd_vlc_run[j] = -1; // escape code
         }
     }
 
