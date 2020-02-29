@@ -380,12 +380,23 @@ static int alloc_buffers(AVCodecContext *avctx)
     return 0;
 }
 
-#define GET_RL_VLC2(level1, run1, level2, run2, gb, jtable, \
-                    table, dual, VLC_BITS, THIRD, BREAK_COND)\
+#define GET_RL_VLC2(level1, run1, level2, run2, gb,         \
+                    jtable, table, dual, VLC_BITS,          \
+                    THIRD, CODEBOOK, BREAK_COND)            \
     index = show_bits(gb, VLC_BITS);                        \
     n = jtable[index][1];                                   \
                                                             \
-    if (n <= 0) { /* switch to RL_VLC */                    \
+    if (n > 0) {                                            \
+        skip_remaining(gb, n);                              \
+        code = jtable[index][0];                            \
+        level1 = dual[code].level1;                         \
+        run1 = dual[code].run1;                             \
+        coeff = dequant_and_decompand(level1, s->quantisation, CODEBOOK);\
+        for (i = 0; i < run1; i++) *coeff_data++ = coeff;   \
+        count += run1;                                      \
+        level2 = dual[code].level2;                         \
+        run2 = dual[code].run2;                             \
+    } else { /* switch to RL_VLC */                         \
         level1 = table[index].level;                        \
         n      = table[index].len;                          \
         if (n < 0) {                                        \
@@ -410,6 +421,8 @@ static int alloc_buffers(AVCodecContext *avctx)
         if (BREAK_COND(level1, run1)) break;                \
         count += run1;                                      \
         if (count > expected) break;                        \
+        coeff = dequant_and_decompand(level1, s->quantisation, CODEBOOK);\
+        for (i = 0; i < run1; i++) *coeff_data++ = coeff;   \
                                                             \
         index = show_bits(gb, VLC_BITS);                    \
         level2 = table[index].level;                        \
@@ -432,18 +445,9 @@ static int alloc_buffers(AVCodecContext *avctx)
         }                                                   \
         run2 = table[index].run;                            \
         skip_remaining(gb, n);                              \
-    } else {                                                \
-        skip_remaining(gb, n);                              \
-        code = jtable[index][0];                            \
-        level1 = dual[code].level1;                         \
-        run1 = dual[code].run1;                             \
-        /* escape */                                        \
-        if (BREAK_COND(level1, run1)) break;                \
-        count += run1;                                      \
+        if (BREAK_COND(level2, run2)) break;                \
+        count += run2;                                      \
         if (count > expected) break;                        \
-                                                            \
-        level2 = dual[code].level2;                         \
-        run2 = dual[code].run2;                             \
     }
 
 static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
@@ -786,19 +790,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                         #define COND9(lvl, run) (lvl == 64)
                         GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
                                     s->joint_vlc_9.table, s->table_9_rl_vlc,
-                                    s->joint9, VLC9_BITS, 0, COND9);
-                        coeff = dequant_and_decompand(level1, s->quantisation, 0);
-                        for (i = 0; i < run1; i++)
-                            *coeff_data++ = coeff;
-
-                        /* escape */
-                        if (COND9(level2, run2))
-                            break;
-
-                        count += run2;
-
-                        if (count > expected)
-                            break;
+                                    s->joint9, VLC9_BITS, 1, 0, COND9);
 
                         coeff = dequant_and_decompand(level2, s->quantisation, 0);
                         for (i = 0; i < run2; i++)
@@ -809,19 +801,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                         #define COND18(lvl, run) (lvl == 255 && run == 2)
                         GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
                                     s->joint_vlc_18.table, s->table_18_rl_vlc,
-                                    s->joint18, VLC18_BITS, 1, COND18);
-                        coeff = dequant_and_decompand(level1, s->quantisation, s->codebook);
-                        for (i = 0; i < run1; i++)
-                            *coeff_data++ = coeff;
-
-                        /* escape */
-                        if (COND18(level2, run2))
-                            break;
-
-                        count += run2;
-
-                        if (count > expected)
-                            break;
+                                    s->joint18, VLC18_BITS, 1, s->codebook, COND18);
 
                         coeff = dequant_and_decompand(level2, s->quantisation, s->codebook);
                         for (i = 0; i < run2; i++)
