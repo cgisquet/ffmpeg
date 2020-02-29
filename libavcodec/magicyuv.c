@@ -235,10 +235,9 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
     *left_top = lt;
 }
 
-#define READ_2PIX_PLANE(dst0, dst1, plane, OP) \
-    GET_VLC_DUAL(dst0, dst1, &gb, s->vlc[4+plane].table, \
-                 s->vlc[plane].table, s->vlc[plane].table, \
-                 VLC_BITS, 3, OP)
+#define READ_2PIX_PLANE(dst, off, plane, OP) \
+    GET_VLC_ITER(dst, off, &gb, s->vlc[4+plane].table, \
+                 s->vlc[plane].table, VLC_BITS, 3, OP)
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -280,24 +279,18 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
-            int count = width/2;
             for (k = 0; k < height; k++) {
-                if (count >= (get_bits_left(&gb)) / (32 * 2)) {
-                    for (x = 0; x < count && get_bits_left(&gb) > 0; x++) {
-                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP14bits);
+                if (width >= get_bits_left(&gb) / 32) {
+                    for (x = 0; x < width-1 && get_bits_left(&gb) > 0;) {
+                        READ_2PIX_PLANE(dst, x, i, OP14bits);
                     }
                 } else {
-                    for (x = 0; x < count; x++) {
-                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP14bits);
+                    for (x = 0; x < width-1;) {
+                        READ_2PIX_PLANE(dst, x, i, OP14bits);
                     }
                 }
-                if( width&1 && get_bits_left(&gb)>0 ) {
-                    unsigned int index;
-                    int nb_bits, code, n;
-                    index = show_bits(&gb, VLC_BITS);
-                    VLC_INTERN(dst[width-1], s->vlc[i].table,
-                               &gb, VLC_BITS, 3);
-                }
+                for (; x < width && get_bits_left(&gb) > 0; x++)
+                    dst[x] = get_vlc2(&gb,  s->vlc[i].table, VLC_BITS, 3);
                 dst += stride;
             }
         }
@@ -416,24 +409,18 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
                 dst += stride;
             }
         } else {
-            int count = width/2;
             for (k = 0; k < height; k++) {
-                if (count >= (get_bits_left(&gb)) / (32 * 2)) {
-                    for (x = 0; x < count && get_bits_left(&gb) > 0; x++) {
-                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP8bits);
+                if (width >= get_bits_left(&gb) / 32) {
+                    for (x = 0; x < width-1 && get_bits_left(&gb) > 0;) {
+                        READ_2PIX_PLANE(dst, x, i, OP8bits);
                     }
                 } else {
-                    for (x = 0; x < count; x++) {
-                        READ_2PIX_PLANE(dst[2 * x], dst[2 * x + 1], i, OP8bits);
+                    for (x = 0; x < width-1;) {
+                        READ_2PIX_PLANE(dst, x, i, OP8bits);
                     }
                 }
-                if( width&1 && get_bits_left(&gb)>0 ) {
-                    unsigned int index;
-                    int nb_bits, code, n;
-                    index = show_bits(&gb, VLC_BITS);
-                    VLC_INTERN(dst[width-1], s->vlc[i].table,
-                               &gb, VLC_BITS, 3);
-                }
+                for (; x < width && get_bits_left(&gb) > 0; x++)
+                    dst[x] = get_vlc2(&gb,  s->vlc[i].table, VLC_BITS, 3);
                 dst += stride;
             }
         }
