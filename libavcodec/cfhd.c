@@ -99,15 +99,17 @@ static void init_frame_defaults(CFHDContext *s)
     s->codebook          = 0;
     s->difference_coding = 0;
     s->progressive       = 0;
+    s->oldcb             = -1;
+    s->oldquant          = 0;
     init_plane_defaults(s);
     init_peak_table_defaults(s);
 }
 
-/* TODO: merge with VLC tables or use LUT */
+/* Actually uses a lut, so far with 263*2+1 elements */
 static inline int dequant_and_decompand(int level, int quantisation, int codebook)
 {
     if (codebook == 0 || codebook == 1) {
-        int64_t abslevel = abs(level);
+        int64_t   abslevel = abs(level);
         if (level < 264)
             return (abslevel + ((768 * abslevel * abslevel * abslevel) / (255 * 255 * 255))) *
                FFSIGN(level) * quantisation;
@@ -381,7 +383,7 @@ static int alloc_buffers(AVCodecContext *avctx)
 }
 
 #define GET_RL_VLC2(level1, run1, level2, run2, gb, jtable, \
-                    table, dual, VLC_BITS, THIRD, CODEBOOK) \
+                    table, dual, VLC_BITS, THIRD)           \
     index = show_bits(gb, VLC_BITS);                        \
     n = jtable[index][1];                                   \
                                                             \
@@ -390,7 +392,7 @@ static int alloc_buffers(AVCodecContext *avctx)
         code = jtable[index][0];                            \
         level1 = dual[code].level1;                         \
         run1 = dual[code].run1;                             \
-        coeff = dequant_and_decompand(level1, s->quantisation, CODEBOOK);\
+        coeff = s->dequant[264+level1];                     \
         for (i = 0; i < run1; i++) *coeff_data++ = coeff;   \
         count += run1;                                      \
         level2 = dual[code].level2;                         \
@@ -420,7 +422,7 @@ static int alloc_buffers(AVCodecContext *avctx)
         if (run1 < 0) break;                                \
         count += run1;                                      \
         if (count > expected) break;                        \
-        coeff = dequant_and_decompand(level1, s->quantisation, CODEBOOK);\
+        coeff = s->dequant[264+level1];                     \
         for (i = 0; i < run1; i++) *coeff_data++ = coeff;   \
                                                             \
         index = show_bits(gb, VLC_BITS);                    \
@@ -765,6 +767,13 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
             int a_expected = highpass_a_height * highpass_a_width;
             int count = 0, bytes;
 
+            if (s->quantisation != s->oldquant || s->codebook != s->oldcb) {
+                for (int c = -263; c < 264; c++)
+                    s->dequant[c+264] = dequant_and_decompand(c, s->quantisation, s->codebook);
+                s->oldquant = s->quantisation;
+                s->oldcb = s->codebook;
+            }
+
             if (!got_buffer) {
                 av_log(avctx, AV_LOG_ERROR, "No end of header tag found\n");
                 ret = AVERROR(EINVAL);
@@ -788,9 +797,9 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                     while (1) {
                         GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
                                     s->joint_vlc_9.table, s->table_9_rl_vlc,
-                                    s->joint9, VLC9_BITS, 1, 0);
+                                    s->joint9, VLC9_BITS, 1);
 
-                        coeff = dequant_and_decompand(level2, s->quantisation, 0);
+                        coeff = s->dequant[264+level2];
                         for (i = 0; i < run2; i++)
                             *coeff_data++ = coeff;
                     }
@@ -798,9 +807,9 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
                     while (1) {
                         GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
                                     s->joint_vlc_18.table, s->table_18_rl_vlc,
-                                    s->joint18, VLC18_BITS, 1, s->codebook);
+                                    s->joint18, VLC18_BITS, 1);
 
-                        coeff = dequant_and_decompand(level2, s->quantisation, s->codebook);
+                        coeff = s->dequant[264+level2];
                         for (i = 0; i < run2; i++)
                             *coeff_data++ = coeff;
                     }
