@@ -383,7 +383,7 @@ static int alloc_buffers(AVCodecContext *avctx)
 }
 
 #define GET_RL_VLC2(level1, run1, level2, run2, gb, jtable, \
-                    table, dual, VLC_BITS, THIRD)           \
+                    table, dual, VLC_BITS)                  \
     index = show_bits(gb, VLC_BITS);                        \
     n = jtable[index][1];                                   \
                                                             \
@@ -407,7 +407,7 @@ static int alloc_buffers(AVCodecContext *avctx)
             index = show_bits(gb, nb_bits) + level1;        \
             level1 = table[index].level;                    \
             n     = table[index].len;                       \
-            if (THIRD && n < 0) {                           \
+            if (n < 0) {                                    \
                 skip_remaining(gb, VLC_BITS);               \
                 nb_bits = -n;                               \
                                                             \
@@ -793,26 +793,25 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
             {
                 int level1, run1, level2, run2, n, coeff, code;
                 unsigned index;
+                CFHD_DUAL_RL_ELEM *dual;
+                CFHD_RL_VLC_ELEM *single;
+                VLC_TYPE (*table)[2];
                 if (!s->codebook) {
-                    while (1) {
-                        GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
-                                    s->joint_vlc_9.table, s->table_9_rl_vlc,
-                                    s->joint9, VLC9_BITS, 1);
-
-                        coeff = s->dequant[264+level2];
-                        for (i = 0; i < run2; i++)
-                            *coeff_data++ = coeff;
-                    }
+                    table = s->joint_vlc_9.table;
+                    single = s->table_9_rl_vlc;
+                    dual = s->joint9;
                 } else {
-                    while (1) {
-                        GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
-                                    s->joint_vlc_18.table, s->table_18_rl_vlc,
-                                    s->joint18, VLC18_BITS, 1);
+                    table = s->joint_vlc_18.table;
+                    single = s->table_18_rl_vlc;
+                    dual = s->joint18;
+                }
+                while (1) {
+                    GET_RL_VLC2(level1, run1, level2, run2, &s->gb,
+                                table, single, dual, VLC9_BITS);
 
-                        coeff = s->dequant[264+level2];
-                        for (i = 0; i < run2; i++)
-                            *coeff_data++ = coeff;
-                    }
+                    coeff = s->dequant[264+level2];
+                    for (i = 0; i < run2; i++)
+                        *coeff_data++ = coeff;
                 }
             }
 

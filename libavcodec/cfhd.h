@@ -30,7 +30,7 @@
 #include "get_bits.h"
 #include "vlc.h"
 
-#define VLC9_BITS     14
+#define VLC9_BITS     12
 #define VLC18_BITS    12
 #define SUBBAND_COUNT 10
 
