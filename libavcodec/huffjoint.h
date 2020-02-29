@@ -68,6 +68,23 @@
         }                                                           \
     } while (0)
 
+#define GET_VLC_ITER(dst, off, gb, Dtable, table, bits, max_depth, OP)\
+    do {                                                            \
+        unsigned int index = show_bits(gb, bits);                   \
+        int          code, n = Dtable[index][1];                    \
+                                                                    \
+        if (n<=0) {                                                 \
+            int nb_bits;                                            \
+            VLC_INTERN(dst[off], table, gb, bits, max_depth);       \
+            off++;                                                  \
+        } else {                                                    \
+            code = Dtable[index][0];                                \
+            OP(dst[off+0], dst[off+1], code);                       \
+            off += 2;                                               \
+            skip_remaining(gb, n);                                  \
+        }                                                           \
+    } while (0)
+
 /** Default operation for reading 8 bits elements */
 #define OP8bits(dst0, dst1, code) dst0 = code>>8; dst1 = code
 
