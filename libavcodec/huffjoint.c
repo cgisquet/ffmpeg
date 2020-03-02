@@ -31,41 +31,95 @@ void* ff_huff_joint_alloc(int numbits)
 int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint32_t* bits0, const uint32_t* bits1,
                       const uint8_t* len0, const uint8_t* len1,
-                      const uint16_t* lut0, const uint16_t* lut1)
+                      const uint16_t* lut0, const uint16_t* lut1,
+                      int mode)
 {
     uint16_t *symbols = array;
     uint16_t *bits    = symbols + (1 << numbits);
     uint8_t  *len     = (uint8_t *)(bits + (1 << numbits));
-    int i, t0, t1;
+    int i = 0, t0, t1;
 
-    for (i = t0 = 0; t0 < num; t0++) {
+    if (mode == 2) {
+    int j, k, l, m;
+    for (j = 0; j < num/2; j++) {
+        for (k = 0; k < 2; k++) {
+        int idx0, l0, limit;
+        if (k && num-1-j == j) break; // same symbol
+        t0 = k ? num-1-j : j;
+        idx0 = lut0 ? lut0[t0] : t0;
+        if (idx0 == 0xFFFF)
+            break;
+        l0 = len0[idx0];
+        limit = numbits - l0;
+        if (limit <= 0)
+            break;
+        if (!l0) break;
+        if ((sign_extend(t0, 8) & (num-1)) != t0)
+            break;
+        for (l = 0; l < num/2; l++) {
+        for (m = 0; m < 2; m++) {
+            int idx1, l1;
+            if (m && num-1-l == l) break; // same symbol
+            t1 = m ? num-1-l : l;
+            idx1 = lut1 ? lut1[t1] : t1;
+            if (idx1 == 0xFFFF)
+                break;
+            l1 = len1[idx1];
+            if (l1 > limit)
+                break;
+            if (!l1) break;
+            if ((sign_extend(t1, 8) & (num-1)) != t1)
+                break;
+            av_assert0(i < (1 << numbits));
+            len[i]     = l0 + l1;
+            bits[i]    = (bits0[idx0] << l1) + bits1[idx1];
+            symbols[i] = (t0 << 8) + (t1 & 0xFF);
+            i++;
+        }
+        }
+        }
+    }
+    } else
+    for (t0 = 0; t0 < num; t0++) {
         int idx0 = lut0 ? lut0[t0] : t0;
         int l0, limit;
         if (idx0 == 0xFFFF)
             continue;
         l0 = len0[idx0];
         limit = numbits - l0;
-        if (limit <= 0 || !l0)
+        if (limit <= 0)
+        {
+            if (mode) break;
             continue;
+        }
+        if (!l0) continue;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             continue;
         for (t1 = 0; t1 < num; t1++) {
             int idx1 = lut1 ? lut1[t1] : t1;
             int l1;
             if (idx1 == 0xFFFF)
+            {
+                if (mode) break;
                 continue;
+            }
             l1 = len1[idx1];
-            if (l1 > limit || !l1)
+            if (l1 > limit)
+            {
+                if (mode) break;
                 continue;
+            }
+            if (!l1) continue;
             if ((sign_extend(t1, 8) & (num-1)) != t1)
                 continue;
             av_assert0(i < (1 << numbits));
             len[i]     = l0 + l1;
             bits[i]    = (bits0[idx0] << l1) + bits1[idx1];
             symbols[i] = (t0 << 8) + (t1 & 0xFF);
-                i++;
+            i++;
         }
     }
+    av_log(NULL, AV_LOG_DEBUG, "Joint: %d codes\n", i);
     ff_free_vlc(vlc);
     return ff_init_vlc_sparse(vlc, numbits, i, len, 1, 1,
                               bits, 2, 2, symbols, 2, 2, 0);

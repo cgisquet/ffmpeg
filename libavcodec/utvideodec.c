@@ -95,7 +95,7 @@ static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym, uint16_t *jsym)
 
     // Tables are sparse in the middle, can't be called with last
     return ff_huff_joint_gen(vlc+1, jsym, 1024, VLC_BITS,
-                             codes, codes, bits, bits, lut, lut);
+                             codes, codes, bits, bits, lut, lut, 0);
 }
 
 static int build_huff(const uint8_t *src, VLC *vlc, int *fsym, uint16_t *jsym)
@@ -150,7 +150,7 @@ static int build_huff(const uint8_t *src, VLC *vlc, int *fsym, uint16_t *jsym)
 
     // Tables are sparse in the middle, can't be called with last
     return ff_huff_joint_gen(vlc+1, jsym, 256, VLC_BITS,
-                             codes, codes, bits, bits, lut, lut);
+                             codes, codes, bits, bits, lut, lut, 2);
 }
 
 static int decode_plane10(UtvideoContext *c, int plane_no,

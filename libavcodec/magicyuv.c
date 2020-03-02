@@ -126,7 +126,7 @@ static int huff_build10(VLC *vlc, VLC *jvlc, uint8_t *len, uint16_t *jsym, int m
 
     // generate joint table
     if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut))
+                          codes, codes, bits, bits, lut, lut, 2))
         return AVERROR_INVALIDDATA;
 
     ff_free_vlc(vlc);
@@ -165,7 +165,7 @@ static int huff_build12(VLC *vlc, VLC *jvlc, uint8_t *len, uint16_t *jsym, int m
 
     // generate joint table
     if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut))
+                          codes, codes, bits, bits, lut, lut, 2))
         return AVERROR_INVALIDDATA;
 
     ff_free_vlc(vlc);
@@ -204,7 +204,7 @@ static int huff_build(VLC *vlc, VLC *jvlc, uint8_t *len, uint16_t *jsym, int mas
 
     // generate joint table
     if (ff_huff_joint_gen(jvlc, jsym, mask, VLC_BITS,
-                          codes, codes, bits, bits, lut, lut))
+                          codes, codes, bits, bits, lut, lut, 2))
         return AVERROR_INVALIDDATA;
 
     ff_free_vlc(vlc);
