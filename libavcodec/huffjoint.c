@@ -37,7 +37,15 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
     uint16_t *symbols = array;
     uint16_t *bits    = symbols + (1 << numbits);
     uint8_t  *len     = (uint8_t *)(bits + (1 << numbits));
-    int i = 0, t0, t1;
+    int i = 0, t0, t1, min = 32;
+
+    for (int j = 0; j < num; j++) {
+        int idx = lut1 ? lut1[j] : j;
+        if (idx == 0xFFFF)
+            continue;
+        if (len1[idx] >= 1 && len1[idx] < min)
+            min = len1[idx];
+    }
 
     if (mode == 2) {
     int j, k, l, m;
@@ -50,10 +58,10 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
         if (idx0 == 0xFFFF)
             break;
         l0 = len0[idx0];
-        limit = numbits - l0;
-        if (limit <= 0)
-            break;
         if (!l0) break;
+        if (l0+min > numbits)
+            break;
+        limit = numbits - l0;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             break;
         for (l = 0; l < num/2; l++) {
@@ -67,7 +75,6 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
             l1 = len1[idx1];
             if (l1 > limit)
                 break;
-            if (!l1) break;
             if ((sign_extend(t1, 8) & (num-1)) != t1)
                 break;
             av_assert0(i < (1 << numbits));
@@ -86,12 +93,13 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
         if (idx0 == 0xFFFF)
             continue;
         l0 = len0[idx0];
-        limit = numbits - l0;
-        if (limit <= 0)
+        if (l0 && l0 < min) min = l0;
+        if (l0+min > numbits)
         {
             if (mode) break;
             continue;
         }
+        limit = numbits - l0;
         if (!l0) continue;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             continue;
