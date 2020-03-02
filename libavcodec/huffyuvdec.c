@@ -130,7 +130,7 @@ static int generate_joint_tables(HYuvContext *s)
             if (ff_huff_joint_gen(&s->vlc[4 + p], symbols,
                                   s->vlc_n, VLC_BITS,
                                   s->bits[p0], s->bits[p],
-                                  s->len[p0], s->len[p], NULL, NULL))
+                                  s->len[p0], s->len[p], NULL, NULL, 2))
                 goto out;
         }
     } else {

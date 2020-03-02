@@ -111,10 +111,15 @@ void* ff_huff_joint_alloc(int numbits);
  * @param len1     Codeword lengths for 2nd element of pair
  * @param lut0     LUT (NULL for same) for value to index of 1st element
  * @param lut1     LUT (NULL for same) for value to index of 2nd element
+ * @param mode     What loop conditions to stop on
+ *                 0: continue other codes if current too long
+ *                 1: stop
+ *                 2: wrap (consider code and max-code) and stop
  */
 int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint32_t* bits0, const uint32_t* bits1,
                       const uint8_t* len0, const uint8_t* len1,
-                      const uint16_t* lut0, const uint16_t* lut1);
+                      const uint16_t* lut0, const uint16_t* lut1,
+                      int mode);
 
 #endif /* AVCODEC_HUFF_JOINT_H */
