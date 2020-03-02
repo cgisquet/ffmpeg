@@ -40,13 +40,6 @@ typedef struct CFHD_RL_VLC_ELEM {
     int16_t run;
 } CFHD_RL_VLC_ELEM;
 
-typedef struct CFHD_DUAL_RL_ELEM {
-    int16_t level1;
-    uint16_t run1;
-    int16_t level2;
-    uint16_t run2;
-} CFHD_DUAL_RL_ELEM;
-
 #define DWT_LEVELS 3
 
 typedef struct SubBand {
@@ -87,11 +80,9 @@ typedef struct CFHDContext {
     AVCodecContext *avctx;
 
     CFHD_RL_VLC_ELEM table_9_rl_vlc[24748];
-    CFHD_DUAL_RL_ELEM joint9[504];
     VLC vlc_9, joint_vlc_9;
 
     CFHD_RL_VLC_ELEM table_18_rl_vlc[21886];
-    CFHD_DUAL_RL_ELEM joint18[235];
     VLC vlc_18, joint_vlc_18;
 
     GetBitContext gb;
