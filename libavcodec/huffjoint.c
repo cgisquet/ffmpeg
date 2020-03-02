@@ -37,11 +37,34 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
     uint16_t *symbols = array;
     uint16_t *bits    = symbols + (1 << numbits);
     uint8_t  *len     = (uint8_t *)(bits + (1 << numbits));
-    int i = 0, t0, t1;
+    int i = 0, t0, t1, min = 32, max = 0;
 
+    for (t1 = 0; t1 < num; t1++) {
+        int idx = lut1 ? lut1[t1] : t1;
+        if (idx == 0xFFFF)
+            break;
+        if (len1[idx] >= 1 && len1[idx] < min)
+            min = len1[idx];
+    }
+    if (mode == 2) {
+        while (max < num/2) {
+            for (t0 = 0; t0 < 2; t0++) {
+                int t = t0 ? num-1-max : max;
+                int idx = lut0 ? lut0[t] : t;
+                if (idx == 0xFFFF || !len0[idx] || len0[idx]+min > numbits)
+                    goto end;
+            }
+            max++;
+        }
+    } else {
+        while (len0[max] && len0[max]+min < numbits && max < num)
+            max++;
+    }
+
+end:
     if (mode == 2) {
     int j, k, l, m;
-    for (j = 0; j < num/2; j++) {
+    for (j = 0; j < max; j++) {
         for (k = 0; k < 2; k++) {
         int idx0, l0, limit;
         if (k && num-1-j == j) break; // same symbol
@@ -50,13 +73,13 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
         if (idx0 == 0xFFFF)
             break;
         l0 = len0[idx0];
-        limit = numbits - l0;
-        if (limit <= 0)
-            break;
         if (!l0) break;
+        if (l0+min > numbits)
+            break;
+        limit = numbits - l0;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             break;
-        for (l = 0; l < num/2; l++) {
+        for (l = 0; l < max; l++) {
         for (m = 0; m < 2; m++) {
             int idx1, l1;
             if (m && num-1-l == l) break; // same symbol
@@ -67,7 +90,6 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
             l1 = len1[idx1];
             if (l1 > limit)
                 break;
-            if (!l1) break;
             if ((sign_extend(t1, 8) & (num-1)) != t1)
                 break;
             av_assert0(i < (1 << numbits));
@@ -80,21 +102,20 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
         }
     }
     } else
-    for (t0 = 0; t0 < num; t0++) {
+    for (t0 = 0; t0 < max; t0++) {
         int idx0 = lut0 ? lut0[t0] : t0;
         int l0, limit;
         if (idx0 == 0xFFFF)
             continue;
         l0 = len0[idx0];
-        limit = numbits - l0;
-        if (limit <= 0) {
+        if (l0+min > numbits || !l0) {
             if (mode) break;
             continue;
         }
-        if (!l0) continue;
         if ((sign_extend(t0, 8) & (num-1)) != t0)
             continue;
-        for (t1 = 0; t1 < num; t1++) {
+        limit = numbits - l0;
+        for (t1 = 0; t1 < max; t1++) {
             int idx1 = lut1 ? lut1[t1] : t1;
             int l1;
             if (idx1 == 0xFFFF) {
