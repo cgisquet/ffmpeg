@@ -153,11 +153,7 @@ static inline unsigned int show_bits(GetBitContext *s, int n);
  */
 
 #if CACHED_BITSTREAM_READER
-# if BITSTREAM_BITS == 32
-#   define MIN_CACHE_BITS (32-7)
-# else
-#   define MIN_CACHE_BITS  32
-# endif
+#   define MIN_CACHE_BITS (BITSTREAM_BITS-7)
 #elif defined LONG_BITSTREAM_READER
 #   define MIN_CACHE_BITS 32
 #else
@@ -262,34 +258,9 @@ static inline int get_bits_count(const GetBitContext *s)
 }
 
 #if CACHED_BITSTREAM_READER
-static inline void refill_half(GetBitContext *s, int is_le)
-{
-#if !UNCHECKED_BITSTREAM_READER
-    if (s->ptr >= s->buffer_end)
-        return;
-#endif
-
-#if BITSTREAM_BITS == 32
-    if (s->bits_left > 16) {
-        if (is_le)
-        s->cache |= (uint32_t)s->ptr[0] << s->bits_left;
-        else
-        s->cache |= (uint32_t)s->ptr[0] << (32 - s->bits_left);
-        s->ptr++;
-        s->bits_left += 8;
-        return;
-    }
-#endif
-
-    if (is_le)
-    s->cache       |= (cache_type)AV_RL_HALF(s->ptr) << s->bits_left;
-    else
-    s->cache       |= (cache_type)AV_RB_HALF(s->ptr) << (BITSTREAM_HBITS - s->bits_left);
-    s->ptr       += sizeof(s->cache)/2;
-    s->bits_left += BITSTREAM_HBITS;
-}
-
-static inline void refill_all(GetBitContext *s, int is_le)
+// See variant 4 in the following article:
+// https://fgiesen.wordpress.com/2018/02/20/reading-bits-in-far-too-many-ways-part-2/
+static inline void refill_gb(GetBitContext *s, int is_le)
 {
 #if !UNCHECKED_BITSTREAM_READER
     if (s->ptr >= s->buffer_end)
@@ -297,11 +268,11 @@ static inline void refill_all(GetBitContext *s, int is_le)
 #endif
 
     if (is_le)
-    s->cache = AV_RL_ALL(s->ptr);
+    s->cache     |= (cache_type)AV_RL_ALL(s->ptr) << s->bits_left;
     else
-    s->cache = AV_RB_ALL(s->ptr);
-    s->ptr += sizeof(s->cache);
-    s->bits_left = BITSTREAM_BITS;
+    s->cache     |= (cache_type)AV_RB_ALL(s->ptr) >> s->bits_left;
+    s->ptr       += (BITSTREAM_BITS-1 - s->bits_left) >> 3;
+    s->bits_left |= BITSTREAM_BITS-8;
 }
 
 static inline cache_type get_val(GetBitContext *s, unsigned n, int is_le)
@@ -374,9 +345,9 @@ static inline int get_xbits(GetBitContext *s, int n)
 
     if (n > s->bits_left)
 #ifdef BITSTREAM_READER_LE
-        refill_half(s, 1);
+        refill_gb(s, 1);
 #else
-        refill_half(s, 0);
+        refill_gb(s, 0);
 #endif
 
 #if BITSTREAM_BITS == 32
@@ -448,9 +419,9 @@ static inline unsigned int get_bits(GetBitContext *s, int n)
     av_assert2(n>0 && n<=32);
     if (n > s->bits_left) {
 #ifdef BITSTREAM_READER_LE
-        refill_half(s, 1);
+        refill_gb(s, 1);
 #else
-        refill_half(s, 0);
+        refill_gb(s, 0);
 #endif
         if (s->bits_left < BITSTREAM_HBITS)
             s->bits_left = n;
@@ -486,7 +457,7 @@ static inline unsigned int get_bits_le(GetBitContext *s, int n)
 #if CACHED_BITSTREAM_READER
     av_assert2(n>0 && n<=32);
     if (n > s->bits_left) {
-        refill_half(s, 1);
+        refill_gb(s, 1);
         if (s->bits_left < BITSTREAM_HBITS)
             s->bits_left = n;
     }
@@ -513,9 +484,9 @@ static inline unsigned int show_bits(GetBitContext *s, int n)
 #if CACHED_BITSTREAM_READER
     if (n > s->bits_left)
 #ifdef BITSTREAM_READER_LE
-        refill_half(s, 1);
+        refill_gb(s, 1);
 #else
-        refill_half(s, 0);
+        refill_gb(s, 0);
 #endif
 
     tmp = show_val(s, n);
@@ -535,7 +506,6 @@ static inline void skip_bits(GetBitContext *s, int n)
         skip_remaining(s, n);
     else {
         n -= s->bits_left;
-        s->cache = 0;
 
         if (n >= BITSTREAM_BITS) {
             unsigned skip = n / 8;
@@ -543,11 +513,14 @@ static inline void skip_bits(GetBitContext *s, int n)
             n -= 8*skip;
             s->ptr += skip;
         }
+
 #ifdef BITSTREAM_READER_LE
-        refill_all(s, 1);
+        s->cache     = AV_RL_ALL(s->ptr);
 #else
-        refill_all(s, 0);
+        s->cache     = AV_RB_ALL(s->ptr);
 #endif
+        s->ptr      += sizeof(cache_type);
+        s->bits_left = BITSTREAM_BITS;
         if (n)
             skip_remaining(s, n);
     }
@@ -561,12 +534,15 @@ static inline void skip_bits(GetBitContext *s, int n)
 static inline unsigned int get_bits1(GetBitContext *s)
 {
 #if CACHED_BITSTREAM_READER
-    if (!s->bits_left)
+    if (!s->bits_left) {
 #ifdef BITSTREAM_READER_LE
-        refill_all(s, 1);
+        s->cache     = AV_RL_ALL(s->ptr);
 #else
-        refill_all(s, 0);
+        s->cache     = AV_RB_ALL(s->ptr);
 #endif
+        s->ptr      += sizeof(cache_type);
+        s->bits_left = BITSTREAM_BITS;
+    }
 
 #ifdef BITSTREAM_READER_LE
     return get_val(s, 1, 1);
@@ -621,20 +597,21 @@ static inline unsigned int get_bits_long(GetBitContext *s, int n)
     if (n > s->bits_left) {
         n -= s->bits_left;
 # ifdef BITSTREAM_READER_LE
-        left = s->bits_left;
-        ret = get_val(s, s->bits_left, 1);
-        refill_all(s, 1);
+        ret = s->cache & ((CACHE_TYPE(1) << s->bits_left) - 1);
+        s->cache = AV_RL_ALL(s->ptr);
 # else
-        ret = get_val(s, s->bits_left, 0);
-        refill_all(s, 0);
+        ret = s->cache >> (BITSTREAM_BITS - s->bits_left);
+        s->cache = AV_RB_ALL(s->ptr);
 # endif
+        s->ptr += sizeof(cache_type);
+        s->bits_left = BITSTREAM_BITS; // OK because consumed right after
     }
 
-#ifdef BITSTREAM_READER_LE
+# ifdef BITSTREAM_READER_LE
     ret = get_val(s, n, 1) << left | ret;
-#else
+# else
     ret = get_val(s, n, 0) | ret << n;
-#endif
+# endif
 
     return ret;
 #else
@@ -725,10 +702,12 @@ static inline int init_get_bits_xe(GetBitContext *s, const uint8_t *buffer,
     s->buffer_end         = buffer + buffer_size;
 
 #if CACHED_BITSTREAM_READER
-    s->ptr                = buffer;
-    s->cache              = 0;
-    s->bits_left          = 0;
-    refill_all(s, is_le);
+    if (is_le)
+        s->cache          = AV_RL_ALL(buffer);
+    else
+        s->cache          = AV_RB_ALL(buffer);
+    s->ptr                = buffer+sizeof(cache_type);
+    s->bits_left          = BITSTREAM_BITS;
 #else
     s->index              = 0;
 #endif
