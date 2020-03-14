@@ -189,6 +189,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     permute(ctx->interlaced_scan, ff_prores_interlaced_scan, idct_permutation);
 
     // init dc_tables
+    if (!avctx->internal->is_copy) {
     for (i = 0; i < sizeof(ac_info); i++) {
         uint32_t ac_codes[1<<AC_BITS];
         uint8_t ac_bits[1<<AC_BITS];
@@ -232,6 +233,8 @@ static av_cold int decode_init(AVCodecContext *avctx)
                    i, codebook, max_bits);
             return AVERROR_BUG;
         }
+    }
+    ctx->vlc_done = 1;
     }
 
     if (avctx->bits_per_raw_sample == 10){
@@ -895,6 +898,19 @@ static av_cold int decode_close(AVCodecContext *avctx)
     return 0;
 }
 
+#if HAVE_THREADS
+static av_cold int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
+{
+    ProresContext *fsrc = src->priv_data;
+    ProresContext *fdst = dst->priv_data;
+    if (!fdst->vlc_done) {
+        memcpy(fdst->ac_vlc, fsrc->ac_vlc, sizeof(fsrc->ac_vlc));
+        fdst->vlc_done = 1;
+    }
+    return 0;
+}
+#endif
+
 AVCodec ff_prores_decoder = {
     .name           = "prores",
     .long_name      = NULL_IF_CONFIG_SMALL("ProRes (iCodec Pro)"),
@@ -906,4 +922,5 @@ AVCodec ff_prores_decoder = {
     .decode         = decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .profiles       = NULL_IF_CONFIG_SMALL(ff_prores_profiles),
+    .update_thread_context = ONLY_IF_THREADS_ENABLED(update_thread_context),
 };
