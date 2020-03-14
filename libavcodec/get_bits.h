@@ -793,7 +793,7 @@ static inline const uint8_t *align_get_bits(GetBitContext *s)
             code  = table[index][0];                            \
             n     = table[index][1];                            \
             if (max_depth > 2 && n < 0) {                       \
-                LAST_SKIP_BITS(name, gb, nb_bits);              \
+                LAST_SKIP_BITS(name, gb, bits);                 \
                 UPDATE_CACHE(name, gb);                         \
                                                                 \
                 nb_bits = -n;                                   \
@@ -878,7 +878,7 @@ static av_always_inline int get_vlc2(GetBitContext *s, VLC_TYPE (*table)[2],
         skip_remaining(s, bits);
         code = set_idx(s, code, &n, &nb_bits, table);
         if (max_depth > 2 && n < 0) {
-            skip_remaining(s, nb_bits);
+            skip_remaining(s, bits);
             code = set_idx(s, code, &n, &nb_bits, table);
         }
     }
