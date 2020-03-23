@@ -51,25 +51,24 @@ static int build_huff10(const uint8_t *src, VLC *vlc, int *fsym)
     uint32_t code;
 
     *fsym = -1;
-    for (i = 0; i < 1024; i++) {
-        he[i].sym = i;
-        he[i].len = *src++;
+    for (i = last = 0; i < 1024; i++) {
+        he[last].sym = i;
+        he[last].len = *src++;
+        if (he[last].len <= 32)
+            last++;
+        else if (he[last].len != 0xFF)
+            return AVERROR_INVALIDDATA;
     }
-    qsort(he, 1024, sizeof(*he), ff_ut10_huff_cmp_len);
+    if (!last)
+        return AVERROR_INVALIDDATA;
+    qsort(he, last, sizeof(*he), ff_ut10_huff_cmp_len);
 
     if (!he[0].len) {
         *fsym = he[0].sym;
         return 0;
     }
 
-    last = 1023;
-    while (he[last].len == 255 && last)
-        last--;
-
-    if (he[last].len > 32) {
-        return -1;
-    }
-
+    last--;
     code = 1;
     for (i = last; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
@@ -95,24 +94,24 @@ static int build_huff(const uint8_t *src, VLC *vlc, int *fsym)
     uint32_t code;
 
     *fsym = -1;
-    for (i = 0; i < 256; i++) {
-        he[i].sym = i;
-        he[i].len = *src++;
+    for (i = last = 0; i < 1024; i++) {
+        he[last].sym = i;
+        he[last].len = *src++;
+        if (he[last].len <= 32)
+            last++;
+        else if (he[last].len != 0xFF)
+            return AVERROR_INVALIDDATA;
     }
-    qsort(he, 256, sizeof(*he), ff_ut_huff_cmp_len);
+    if (!last)
+        return AVERROR_INVALIDDATA;
+    qsort(he, last, sizeof(*he), ff_ut10_huff_cmp_len);
 
     if (!he[0].len) {
         *fsym = he[0].sym;
         return 0;
     }
 
-    last = 255;
-    while (he[last].len == 255 && last)
-        last--;
-
-    if (he[last].len > 32)
-        return -1;
-
+    last--;
     code = 1;
     for (i = last; i >= 0; i--) {
         codes[i] = code >> (32 - he[i].len);
