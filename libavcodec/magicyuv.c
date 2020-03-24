@@ -278,11 +278,11 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
         } else {
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-2 && get_bits_left(&gb) > 0;) {
+                    for (x = 0; x < width-3 && get_bits_left(&gb) > 0;) {
                         READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
                     }
                 } else {
-                    for (x = 0; x < width-2;) {
+                    for (x = 0; x < width-3;) {
                         READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
                     }
                 }
@@ -408,11 +408,11 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
         } else {
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-2 && get_bits_left(&gb) > 0;) {
+                    for (x = 0; x < width-3 && get_bits_left(&gb) > 0;) {
                         READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
                     }
                 } else {
-                    for (x = 0; x < width-2;) {
+                    for (x = 0; x < width-3;) {
                         READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
                     }
                 }

@@ -143,203 +143,135 @@ end:
                               bits, 2, 2, symbols, 2, 2, 0);
 }
 
-#define MAX_JOINT_CODES   1500
+static void add_level(VLC_MULTI* table, const int num, const int numbits,
+                      const uint32_t* bits, const uint8_t* len,
+                      const uint16_t* lut, const int mode,
+                      uint32_t curcode, int curlen,
+                      int curlimit, int curlevel,
+                      const int minlen, const int max,
+                      unsigned* levelcnt, VLC_MULTI *info)
+{
+    int t, l;
+    uint32_t code;
+    if (mode == 2) {
+        int i, j;
+        if (num > 256 && curlevel > 2)
+            return; // No room
+        for (i = 0; i < max; i++) {
+            for (j = 0; j < 2; j++) {
+                int idx, newlimit;
+                t = j ? num-1-i : i;
+                idx = lut ? lut[t] : t;
+                l = len[idx];
+                if (l > curlimit)
+                    return;
+                code = (curcode << l) + bits[idx];
+                newlimit = curlimit - l;
+                l  += curlen;
+                if (num > 256) AV_WN16(info->val+2*curlevel, t);
+                else info->val[curlevel] = t&0xFF;
+
+                if (curlevel) { // let's not add single entries
+                    uint32_t val = (code << (32 - l)) >> (32 - numbits);
+                    uint32_t  nb = val + (1U << (numbits - l));
+                    info->len = l;
+                    info->num = curlevel+1;
+                    for (; val < nb; val++)
+                        AV_COPY64(table+val, info);
+                    levelcnt[curlevel-1]++;
+                }
+
+                if (curlevel+1 < VLC_MULTI_MAX_SYMBOLS && newlimit >= minlen) {
+                    add_level(table, num, numbits,
+                              bits, len, lut, mode,
+                              code, l, newlimit, curlevel+1,
+                              minlen, max, levelcnt, info);
+                }
+            }
+        }
+    } else {
+        if (max > 256 && curlevel > 2)
+            return; // No room
+        for (t = 0; t < max; t++) {
+            int newlimit, idx = lut ? lut[t] : t;
+            l = len[idx];
+            if (l > curlimit)
+                return;
+            code = (curcode << l) + bits[idx];
+            if (max > 256) AV_WN16(info->val+2*curlevel, t);
+            else info->val[curlevel] = t&0xFF;
+
+            if (curlevel) { // let's not add single entries
+                uint32_t val = (code << (32 - l)) >> (32 - numbits);
+                int       nb = val + (1 << (numbits - l));
+                info->len = l+curlen;
+                info->num = curlevel+1;
+                for (; val < nb; val++)
+                    AV_COPY64(table+val, info);
+                levelcnt[curlevel-1]++;
+            }
+
+            newlimit = curlimit - l;
+            if (curlevel+1 < VLC_MULTI_MAX_SYMBOLS && newlimit >= minlen) {
+                add_level(table, num, numbits,
+                          bits, len, lut, mode,
+                          code, l, newlimit, curlevel+1,
+                          minlen, max, levelcnt, info);
+            }
+        }
+    }
+
+    return;
+}
 
 int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
                       int num, int numbits,
                       const uint32_t* bits, const uint8_t* len,
                       const uint16_t* lut, int mode)
 {
-    VLC vlc2, vlc3;
-    uint16_t bits2[MAX_JOINT_CODES], bits3[MAX_JOINT_CODES];
-    uint8_t  len2[MAX_JOINT_CODES], len3[MAX_JOINT_CODES];
-    uint8_t  val2[2*MAX_JOINT_CODES], val3[3*MAX_JOINT_CODES];
-    int i = 0, i3 = 0, t0, t1, t2, min = 32, max = 0;
+    int j, min = 32, max = 0;
+    unsigned count[VLC_MULTI_MAX_SYMBOLS-1] = { 0, };
+    VLC_MULTI info = { { 0, }, 0, };
 
-    for (int j = 0; j < num; j++) {
+    for (j = 0; j < num; j++) {
         int idx = lut ? lut[j] : j;
         if (idx == 0xFFFF)
             continue;
         if (len[idx] >= 1 && len[idx] < min)
             min = len[idx];
     }
-    while (max < num) {
-        int idx = lut ? lut[max] : max;
-        if (idx == 0xFFFF || len[idx]+min > numbits)
-            break;
-        max++;
-    }
 
     if (mode == 2) {
-        int j, k, l, m, n, o;
-        for (j = 0; j < max; j++) {
-            for (k = 0; k < 2; k++) {
-                int idx0, l0, limit;
-                if (k && num-1-j == j) break; // same symbol
-                t0 = k ? num-1-j : j;
-                idx0 = lut ? lut[t0] : t0;
-                if (idx0 == 0xFFFF)
-                    break;
-                l0 = len[idx0];
-                if (l0+min > numbits || !l0)
-                    break;
-                limit = numbits - l0;
-                if ((sign_extend(t0, 8) & (num-1)) != t0)
-                    continue;
-                for (l = 0; l < max; l++) {
-                    for (m = 0; m < 2; m++) {
-                        int idx1, l1, limit2;
-                        if (m && num-1-l == l) break; // same symbol
-                        t1 = m ? num-1-l : l;
-                        idx1 = lut ? lut[t1] : t1;
-                        if (idx1 == 0xFFFF)
-                            break;
-                        l1 = len[idx1];
-                        if (l1 > limit)
-                            break;
-                        if ((sign_extend(t1, 8) & (num-1)) != t1)
-                            continue;
-                        len2 [i]    = l0 + l1;
-                        bits2[i]    = (bits[idx0] << l1) + bits[idx1];
-                        val2[2*i+0] = t0&0xFF;
-                        val2[2*i+1] = t1&0xFF;
-                        i++;
-
-                        limit2 = numbits - l0 - l1;
-                        if (limit >= min && i3 < MAX_JOINT_CODES)
-                        for (n = 0; n < max; n++) {
-                            for (o = 0; o < 2; o++) {
-                                int idx2, l2;
-                                if (o && num-1-n == n) break; // same symbol
-                                t2 = o ? num-1-n : n;
-                                idx2 = lut ? lut[t2] : t2;
-                                if (idx2 == 0xFFFF)
-                                    break;
-                                l2 = len[idx2];
-                                if (l2 > limit2 || !l2)
-                                    break;
-                                if ((sign_extend(t2, 8) & (num-1)) != t2)
-                                    continue;
-                                len3 [i3]    = l0 + l1 + l2;
-                                bits3[i3]    = (bits[idx0] << (l1+l2)) + (bits[idx1]<<l2) + bits[idx2];
-                                val3[3*i3+0] = t0&0xFF;
-                                val3[3*i3+1] = t1&0xFF;
-                                val3[3*i3+2] = t2&0xFF;
-                                i3++;
-                                if (i3 == MAX_JOINT_CODES)
-                                    goto next2;
-                            }
-                        }
-
-next2:
-                        if (i == MAX_JOINT_CODES)
-                            goto end;
-                    }
-                }
-            }
-        }
-    } else {
-        for (t0 = 0; t0 < max; t0++) {
-            int idx0 = lut ? lut[t0] : t0;
-            int l0, limit;
-            if (idx0 == 0xFFFF)
-                continue;
-            l0 = len[idx0];
-            if (l0 && l0 < min) min = l0;
-            if (l0+min > numbits) {
-                if (mode) break;
-                continue;
-            }
-            limit = numbits - l0;
-            if (!l0) continue;
-            if ((sign_extend(t0, 8) & (num-1)) != t0)
-                continue;
-            for (t1 = 0; t1 < max; t1++) {
-                int idx1 = lut ? lut[t1] : t1;
-                int limit2, l1;
-                if (idx1 == 0xFFFF) {
-                    if (mode) break;
-                    continue;
-                }
-                l1 = len[idx1];
-                if (l1 > limit) {
-                    if (mode) break;
-                    continue;
-                }
-                if (!l1) continue;
-                if ((sign_extend(t1, 8) & (num-1)) != t1)
-                    continue;
-                av_assert0(i < (1 << numbits));
-                len2 [i]    = l0 + l1;
-                bits2[i]    = (bits[idx0] << l1) + bits[idx1];
-                val2[2*i+0] = t0;
-                val2[2*i+1] = t1;
-                i++;
-
-                limit2 = limit - l1;
-                if (limit2+min < numbits && i3 < MAX_JOINT_CODES)
-                for (t2 = 0; t2 < max; t2++) {
-                    int idx2 = lut ? lut[t2] : t2;
-                    int l2;
-                    if (idx2 == 0xFFFF) {
-                        if (mode) break;
-                        continue;
-                    }
-                    l2 = len[idx2];
-                    if (l2 > limit2) {
-                        if (mode) break;
-                        continue;
-                    }
-                    if (!l2) continue;
-                    if ((sign_extend(t2, 8) & (num-1)) != t2)
-                        break;
-                    len3 [i3]    = l0 + l1 + l2;
-                    bits3[i3]    = (bits[idx0] << (l1+l2)) + (bits[idx1]<<l2) + bits[idx2];
-                    val3[3*i3+0] = t0;
-                    val3[3*i3+1] = t1;
-                    val3[3*i3+2] = t2;
-                    i3++;
-                    if (i3 == MAX_JOINT_CODES)
-                        goto next0;
-                }
-
-next0:
-                if (i == MAX_JOINT_CODES)
+        while (max < num/2) {
+            for (j = 0; j < 2; j++) {
+                int t = j ? num-1-max : max;
+                int idx = lut ? lut[t] : t;
+                if (idx == 0xFFFF || !len[idx] || len[idx]+min > numbits)
                     goto end;
             }
+            max++;
+        }
+    } else {
+        while (max < num) {
+            int idx = lut ? lut[max] : max;
+            if (idx == 0xFFFF || len[idx]+min > numbits)
+                break;
+            max++;
         }
     }
 
 end:
-    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d codes min=%ubits max=%u\n", i, i3, min, max);
-    if (ff_init_vlc_sparse(&vlc2, numbits, i, len2, 1, 1,
-                           bits2, 2, 2, NULL, 0, 0, 0))
-        return AVERROR_INVALIDDATA;
-    if (ff_init_vlc_sparse(&vlc3, numbits, i3, len3, 1, 1,
-                           bits3, 2, 2, NULL, 0, 0, 0))
-        return AVERROR_INVALIDDATA;
-
-    for (i = 0; i < 1<<numbits; i++) {
-        int idx;
-        if (vlc3.table[i][1] > 0) {
-            idx = vlc3.table[i][0];
-            table[i].len = vlc3.table[i][1];
-            table[i].num = 3;
-            table[i].val[0] = val3[3*idx+0]; table[i].val[1] = val3[3*idx+1]; table[i].val[2] = val3[3*idx+2];
-        } else if (vlc2.table[i][1] > 0) {
-            idx = vlc2.table[i][0];
-            table[i].len = vlc2.table[i][1];
-            table[i].num = 2;
-            table[i].val[0] = val2[2*idx+0]; table[i].val[1] = val2[2*idx+1];
-        } else {
-            table[i].len = single->table[i][1];
-            table[i].num = single->table[i][1] > 0 ? 1 : 0;
-            AV_WN16(table[i].val, single->table[i][0]);
-        }
+    for (j = 0; j < 1<<numbits; j++) {
+        table[j].len = single->table[j][1];
+        table[j].num = single->table[j][1] > 0 ? 1 : 0;
+        AV_WN16(table[j].val, single->table[j][0]);
     }
 
-    ff_free_vlc(&vlc2);
-    ff_free_vlc(&vlc3);
+    add_level(table, num, numbits, bits, len, lut, mode,
+              0, 0, numbits, 0, min, max, count, &info);
+
+    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d/%d codes min=%ubits max=%u\n",
+           count[0], count[1], count[2], min, max);
 
     return 0;
 }

@@ -122,28 +122,25 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint16_t* lut0, const uint16_t* lut1,
                       int mode);
 
+#define VLC_MULTI_MAX_SYMBOLS  4
+
 typedef struct VLC_MULTI {
-    uint8_t val[3];
+    uint8_t val[6];
     int8_t len; // -31,32
     uint8_t num;
 } VLC_MULTI;
 
 #define WRITE_MULTI8b(dst, off, entry)                              \
         if (entry.num) {                                            \
-            AV_WN32(dst+off, AV_RN32(entry.val));                   \
+            AV_COPY32(dst+off, &(entry));                           \
             off += entry.num;                                       \
-            n = entry.len;                                          \
         } else {
 
 #define WRITE_MULTI16b(dst, off, entry)                             \
-        switch (entry.num) {                                        \
-        case 3: dst[off+2] = entry.val[2];                          \
-        case 2: dst[off+1] = entry.val[1];                          \
-        case 1: dst[off+0] = entry.val[0];                          \
+        if (entry.num) {                                            \
+            AV_COPY64(dst+off, &(entry));                           \
             off += entry.num;                                       \
-            n = entry.len;                                          \
-            break;                                                  \
-        default:
+        } else {
 
 #define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth, OP) \
     do {                                                            \
