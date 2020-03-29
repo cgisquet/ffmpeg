@@ -125,13 +125,29 @@ static int generate_joint_tables(HYuvContext *s)
     if (s->bitstream_bpp < 24 || s->version > 2) {
         int count = 1 + s->alpha + 2*s->chroma;
         int p;
-        for (p = 0; p < count; p++) {
-            int p0 = s->version > 2 ? p : 0;
+        for (p = 0; p < (s->version > 2 ? count : 1); p++) {
+            if (!s->multi[p]) {
+                s->multi[p] = av_malloc(sizeof(VLC_MULTI)<<VLC_BITS);
+                if (!s->multi[p]) {
+                    ret = AVERROR(ENOMEM);
+                    goto out;
+                }
+            }
+            if (ff_huff_multi_gen(s->multi[p], s->vlc+p, s->vlc_n,
+                                  VLC_BITS, s->bits[p], s->len[p], NULL, 2)) {
+                ret = AVERROR(ENOMEM);
+                goto out;
+            }
+        }
+        if (s->version <= 2)
+        for (p = 1; p < count; p++) {
             if (ff_huff_joint_gen(&s->vlc[4 + p], symbols,
                                   s->vlc_n, VLC_BITS,
-                                  s->bits[p0], s->bits[p],
-                                  s->len[p0], s->len[p], NULL, NULL, 2))
+                                  s->bits[0], s->bits[p],
+                                  s->len[0], s->len[p], NULL, NULL, 2)) {
+                ret = AVERROR(ENOMEM);
                 goto out;
+            }
         }
     } else {
         uint8_t (*map)[4] = (uint8_t(*)[4]) s->pix_bgr_map;
@@ -208,7 +224,7 @@ static int read_huffman_tables(HYuvContext *s, const uint8_t *src, int length)
             return ret;
     }
 
-    if ((ret = generate_joint_tables(s)) < 0)
+    if (s->bps <= 14 && (ret = generate_joint_tables(s)) < 0)
         return ret;
 
     return (get_bits_count(&gb) + 7) / 8;
@@ -248,7 +264,7 @@ static int read_old_huffman_tables(HYuvContext *s)
             return ret;
     }
 
-    if ((ret = generate_joint_tables(s)) < 0)
+    if (s->bps <= 14 && (ret = generate_joint_tables(s)) < 0)
         return ret;
 
     return 0;
@@ -264,6 +280,8 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
     for (i = 0; i < 8; i++)
         ff_free_vlc(&s->vlc[i]);
+    for (i = 0; i < 4; i++)
+        av_freep(&s->multi[i]);
 
     return 0;
 }
@@ -279,7 +297,8 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
     ff_huffyuvdsp_init(&s->hdsp, avctx->pix_fmt);
     ff_llviddsp_init(&s->llviddsp);
-    memset(s->vlc, 0, 4 * sizeof(VLC));
+    memset(s->vlc, 0, 8 * sizeof(VLC));
+    memset(s->multi, 0, 4 * sizeof(VLC_MULTI*));
 
     s->interlaced = avctx->height > 288;
     s->bgr32      = 1;
@@ -550,7 +569,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     return ret;
 }
 
-#define READ_2PIX(dst0, dst1, plane1)                                   \
+#define READ_2PIX(dst0, dst1, plane1)                               \
     GET_VLC_DUAL(dst0, dst1, &s->gb, s->vlc[4+plane1].table,        \
                  s->vlc[0].table, s->vlc[plane1].table, VLC_BITS, 3, OP8bits)
 
@@ -582,19 +601,19 @@ static void decode_422_bitstream(HYuvContext *s, int count)
 }
 
 #define READ_2PIX_PLANE(dst, off, plane, OP) \
-    GET_VLC_ITER(dst, off, &s->gb, s->vlc[4+plane].table, \
-                 s->vlc[plane].table, VLC_BITS, 3, OP)
+    GET_VLC_MULTI(dst, off, &s->gb, s->multi[plane], \
+                  s->vlc[plane].table, VLC_BITS, 3, OP)
 
 static void decode_gray_bitstream(HYuvContext *s, int count)
 {
     int i;
     if (count >= get_bits_left(&s->gb) / 32) {
-        for (i = 0; i < count-1 && get_bits_left(&s->gb) > 0;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0, OP8bits);
+        for (i = 0; i < count-3 && get_bits_left(&s->gb) > 0;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0, WRITE_MULTI8b);
         }
     } else {
-        for (i = 0; i < count-1;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0, OP8bits);
+        for (i = 0; i < count-3;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0, WRITE_MULTI8b);
         }
     }
     for (; i < count && get_bits_left(&s->gb) > 0; i++)
@@ -609,12 +628,12 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         decode_gray_bitstream(s, width);
     } else if (s->bps <= 14) {
         if (width >= get_bits_left(&s->gb) / 32) {
-            for (i = 0; i < width-1 && get_bits_left(&s->gb) > 0;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane, OP14bits);
+            for (i = 0; i < width-3 && get_bits_left(&s->gb) > 0;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane, WRITE_MULTI16b);
             }
         } else {
-            for (i = 0; i < width-1;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane, OP14bits);
+            for (i = 0; i < width-3;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane, WRITE_MULTI16b);
             }
         }
         for (; i < width && get_bits_left(&s->gb) > 0; i++)
