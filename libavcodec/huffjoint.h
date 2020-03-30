@@ -122,7 +122,7 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint16_t* lut0, const uint16_t* lut1,
                       int mode);
 
-#define VLC_MULTI_MAX_SYMBOLS  4
+#define VLC_MULTI_MAX_SYMBOLS  6
 
 typedef struct VLC_MULTI {
     uint8_t val[6];
@@ -130,23 +130,14 @@ typedef struct VLC_MULTI {
     uint8_t num;
 } VLC_MULTI;
 
-#define WRITE_MULTI8b(dst, off, entry)                              \
-        if (entry.num) {                                            \
-            AV_COPY32(dst+off, &(entry));                           \
-            off += entry.num;                                       \
-        } else {
-
-#define WRITE_MULTI16b(dst, off, entry)                             \
-        if (entry.num) {                                            \
-            AV_COPY64(dst+off, &(entry));                           \
-            off += entry.num;                                       \
-        } else {
-
-#define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth, OP) \
+#define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth) \
     do {                                                            \
         unsigned int index = show_bits(gb, bits);                   \
         int nb_bits, code, n = Jtable[index].len;                   \
-        OP(dst, off, Jtable[index])                                 \
+        if (Jtable[index].num) {                                    \
+            AV_COPY64(dst+off, Jtable[index].val);                  \
+            off += Jtable[index].num;                               \
+        } else {                                                    \
             code = AV_RN16(Jtable[index].val);                      \
             skip_remaining(gb, bits);                               \
             code = set_idx(gb, code, &n, &nb_bits, table);          \

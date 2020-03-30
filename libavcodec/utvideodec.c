@@ -216,9 +216,9 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
         prev = 0x200;
         for (j = sstart; j < send; j++) {
             uint16_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width-3;) {
+            for (i = 0; i < width-2;) {
                 GET_VLC_MULTI(buf, i, &gb, ((VLC_MULTI*)c->multi_vlc),
-                              vlc.table, VLC_BITS, 3, WRITE_MULTI16b);
+                              vlc.table, VLC_BITS, 3);
             }
             for (; i < width; i++)
                 buf[i] = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
@@ -377,9 +377,9 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         prev = 0x80;
         for (j = sstart; j < send; j++) {
             uint8_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width-3;) {
+            for (i = 0; i < width-5;) {
                 GET_VLC_MULTI(buf, i, &gb, ((VLC_MULTI*)c->multi_vlc),
-                              vlc.table, VLC_BITS, 3, WRITE_MULTI8b);
+                              vlc.table, VLC_BITS, 3);
             }
             for (; i < width; i++)
                 buf[i] = get_vlc2(&gb, vlc.table, VLC_BITS, 3);

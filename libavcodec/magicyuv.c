@@ -232,9 +232,9 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
     *left_top = lt;
 }
 
-#define READ_2PIX_PLANE(dst, off, plane, OP) \
+#define READ_2PIX_PLANE(dst, off, plane) \
     GET_VLC_MULTI(dst, off, &gb, s->multi[plane], \
-                 s->vlc[plane].table, VLC_BITS, 3, OP)
+                 s->vlc[plane].table, VLC_BITS, 3)
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -279,11 +279,11 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
                     for (x = 0; x < width-3 && get_bits_left(&gb) > 0;) {
-                        READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
+                        READ_2PIX_PLANE(dst, x, i);
                     }
                 } else {
                     for (x = 0; x < width-3;) {
-                        READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
+                        READ_2PIX_PLANE(dst, x, i);
                     }
                 }
                 for (; x < width && get_bits_left(&gb) > 0; x++)
@@ -408,12 +408,12 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
         } else {
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-3 && get_bits_left(&gb) > 0;) {
-                        READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
+                    for (x = 0; x < width-5 && get_bits_left(&gb) > 0;) {
+                        READ_2PIX_PLANE(dst, x, i);
                     }
                 } else {
-                    for (x = 0; x < width-3;) {
-                        READ_2PIX_PLANE(dst, x, i, WRITE_MULTI16b);
+                    for (x = 0; x < width-5;) {
+                        READ_2PIX_PLANE(dst, x, i);
                     }
                 }
                 for (; x < width && get_bits_left(&gb) > 0; x++)

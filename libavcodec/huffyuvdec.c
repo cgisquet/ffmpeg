@@ -600,20 +600,20 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     }
 }
 
-#define READ_2PIX_PLANE(dst, off, plane, OP) \
+#define READ_2PIX_PLANE(dst, off, plane) \
     GET_VLC_MULTI(dst, off, &s->gb, s->multi[plane], \
-                  s->vlc[plane].table, VLC_BITS, 3, OP)
+                  s->vlc[plane].table, VLC_BITS, 3)
 
 static void decode_gray_bitstream(HYuvContext *s, int count)
 {
     int i;
     if (count >= get_bits_left(&s->gb) / 32) {
-        for (i = 0; i < count-3 && get_bits_left(&s->gb) > 0;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0, WRITE_MULTI8b);
+        for (i = 0; i < count-5 && get_bits_left(&s->gb) > 0;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0);
         }
     } else {
-        for (i = 0; i < count-3;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0, WRITE_MULTI8b);
+        for (i = 0; i < count-5;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0);
         }
     }
     for (; i < count && get_bits_left(&s->gb) > 0; i++)
@@ -628,12 +628,12 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         decode_gray_bitstream(s, width);
     } else if (s->bps <= 14) {
         if (width >= get_bits_left(&s->gb) / 32) {
-            for (i = 0; i < width-3 && get_bits_left(&s->gb) > 0;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane, WRITE_MULTI16b);
+            for (i = 0; i < width-2 && get_bits_left(&s->gb) > 0;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane);
             }
         } else {
-            for (i = 0; i < width-3;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane, WRITE_MULTI16b);
+            for (i = 0; i < width-2;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane);
             }
         }
         for (; i < width && get_bits_left(&s->gb) > 0; i++)

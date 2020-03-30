@@ -270,8 +270,8 @@ end:
     add_level(table, num, numbits, bits, len, lut, mode,
               0, 0, numbits, 0, min, max, count, &info);
 
-    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d/%d codes min=%ubits max=%u\n",
-           count[0], count[1], count[2], min, max);
+    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d/%d/%d/%d codes min=%ubits max=%u\n",
+           count[0], count[1], count[2], count[3], count[4], min, max);
 
     return 0;
 }
