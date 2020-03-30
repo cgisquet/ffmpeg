@@ -122,4 +122,49 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint16_t* lut0, const uint16_t* lut1,
                       int mode);
 
+typedef struct VLC_MULTI {
+    uint8_t val[3];
+    int8_t len; // -31,32
+    uint8_t num;
+} VLC_MULTI;
+
+#define WRITE_MULTI8b(dst, off, entry)                              \
+        if (entry.num) {                                            \
+            AV_WN32(dst+off, AV_RN32(entry.val));                   \
+            off += entry.num;                                       \
+            n = entry.len;                                          \
+        } else {
+
+#define WRITE_MULTI16b(dst, off, entry)                             \
+        switch (entry.num) {                                        \
+        case 3: dst[off+2] = entry.val[2];                          \
+        case 2: dst[off+1] = entry.val[1];                          \
+        case 1: dst[off+0] = entry.val[0];                          \
+            off += entry.num;                                       \
+            n = entry.len;                                          \
+            break;                                                  \
+        default:
+
+#define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth, OP) \
+    do {                                                            \
+        unsigned int index = show_bits(gb, bits);                   \
+        int nb_bits, code, n = Jtable[index].len;                   \
+        OP(dst, off, Jtable[index])                                 \
+            code = AV_RN16(Jtable[index].val);                      \
+            skip_remaining(gb, bits);                               \
+            code = set_idx(gb, code, &n, &nb_bits, table);          \
+            if (max_depth > 2 && n < 0) {                           \
+                skip_remaining(gb, bits);                           \
+                code = set_idx(gb, code, &n, &nb_bits, table);      \
+            }                                                       \
+            dst[off++] = code;                                      \
+        }                                                           \
+        skip_remaining(gb, n);                                      \
+    } while (0)
+
+int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
+                      int num, int numbits,
+                      const uint32_t* bits, const uint8_t* len,
+                      const uint16_t* lut, int mode);
+
 #endif /* AVCODEC_HUFF_JOINT_H */
