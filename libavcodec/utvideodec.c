@@ -157,7 +157,7 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
     GetBitContext gb;
     int prev, fsym;
 
-    if ((ret = build_huff10(huff, &vlc, &fsym, c->multi_vlc)) < 0) {
+    if ((ret = build_huff10(huff, &vlc, &fsym, &c->multi_vlc)) < 0) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return ret;
     }
@@ -216,9 +216,9 @@ static int decode_plane10(UtvideoContext *c, int plane_no,
         prev = 0x200;
         for (j = sstart; j < send; j++) {
             uint16_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width-2;) {
-                GET_VLC_MULTI(buf, i, &gb, ((VLC_MULTI*)c->multi_vlc),
-                              vlc.table, VLC_BITS, 3);
+            for (i = 0; i < width-VLC_MULTI_MAX_SYMBOLS+1;) {
+                GET_VLC_MULTI(buf, i, &gb, c->multi_vlc,
+                              vlc.table, VLC_BITS, 3, MULTI16b);
             }
             for (; i < width; i++)
                 buf[i] = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
@@ -317,7 +317,7 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         return 0;
     }
 
-    if (build_huff(src, &vlc, &fsym, c->multi_vlc)) {
+    if (build_huff(src, &vlc, &fsym, &c->multi_vlc)) {
         av_log(c->avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
         return AVERROR_INVALIDDATA;
     }
@@ -377,9 +377,9 @@ static int decode_plane(UtvideoContext *c, int plane_no,
         prev = 0x80;
         for (j = sstart; j < send; j++) {
             uint8_t* buf = !use_pred ? dest : c->buffer;
-            for (i = 0; i < width-5;) {
-                GET_VLC_MULTI(buf, i, &gb, ((VLC_MULTI*)c->multi_vlc),
-                              vlc.table, VLC_BITS, 3);
+            for (i = 0; i < width-VLC_MULTI_MAX_SYMBOLS+1;) {
+                GET_VLC_MULTI(buf, i, &gb, c->multi_vlc,
+                              vlc.table, VLC_BITS, 3, MULTI8b);
             }
             for (; i < width; i++)
                 buf[i] = get_vlc2(&gb, vlc.table, VLC_BITS, 3);
@@ -947,6 +947,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     ff_utvideodsp_init(&c->utdsp);
     ff_bswapdsp_init(&c->bdsp);
     ff_llviddsp_init(&c->llviddsp);
+    memset(&c->multi_vlc, 0, sizeof(c->multi_vlc));
 
     c->slice_bits_size = 0;
 
@@ -1053,12 +1054,6 @@ static av_cold int decode_init(AVCodecContext *avctx)
     if (!c->buffer)
         return AVERROR(ENOMEM);
 
-    c->multi_vlc = av_malloc(sizeof(VLC_MULTI)<<VLC_BITS);
-    if (!c->multi_vlc) {
-        av_freep(&c->buffer);
-        return AVERROR(ENOMEM);
-    }
-
     av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &h_shift, &v_shift);
     if ((avctx->width  & ((1<<h_shift)-1)) ||
         (avctx->height & ((1<<v_shift)-1))) {
@@ -1115,7 +1110,7 @@ static av_cold int decode_end(AVCodecContext *avctx)
 
     av_freep(&c->slice_bits);
     av_freep(&c->buffer);
-    av_freep(&c->multi_vlc);
+    ff_huff_multi_free(&c->multi_vlc);
 
     return 0;
 }

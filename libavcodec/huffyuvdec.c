@@ -126,14 +126,7 @@ static int generate_joint_tables(HYuvContext *s)
         int count = 1 + s->alpha + 2*s->chroma;
         int p;
         for (p = 0; p < (s->version > 2 ? count : 1); p++) {
-            if (!s->multi[p]) {
-                s->multi[p] = av_malloc(sizeof(VLC_MULTI)<<VLC_BITS);
-                if (!s->multi[p]) {
-                    ret = AVERROR(ENOMEM);
-                    goto out;
-                }
-            }
-            if (ff_huff_multi_gen(s->multi[p], s->vlc+p, s->vlc_n,
+            if (ff_huff_multi_gen(s->multi+p, s->vlc+p, s->vlc_n,
                                   VLC_BITS, s->bits[p], s->len[p], NULL, 2)) {
                 ret = AVERROR(ENOMEM);
                 goto out;
@@ -281,7 +274,7 @@ static av_cold int decode_end(AVCodecContext *avctx)
     for (i = 0; i < 8; i++)
         ff_free_vlc(&s->vlc[i]);
     for (i = 0; i < 4; i++)
-        av_freep(&s->multi[i]);
+        ff_huff_multi_free(s->multi+i);
 
     return 0;
 }
@@ -298,7 +291,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     ff_huffyuvdsp_init(&s->hdsp, avctx->pix_fmt);
     ff_llviddsp_init(&s->llviddsp);
     memset(s->vlc, 0, 8 * sizeof(VLC));
-    memset(s->multi, 0, 4 * sizeof(VLC_MULTI*));
+    memset(s->multi, 0, sizeof(s->multi));
 
     s->interlaced = avctx->height > 288;
     s->bgr32      = 1;
@@ -600,20 +593,20 @@ static void decode_422_bitstream(HYuvContext *s, int count)
     }
 }
 
-#define READ_2PIX_PLANE(dst, off, plane) \
+#define READ_2PIX_PLANE(dst, off, plane, OP) \
     GET_VLC_MULTI(dst, off, &s->gb, s->multi[plane], \
-                  s->vlc[plane].table, VLC_BITS, 3)
+                  s->vlc[plane].table, VLC_BITS, 3, OP)
 
 static void decode_gray_bitstream(HYuvContext *s, int count)
 {
     int i;
     if (count >= get_bits_left(&s->gb) / 32) {
-        for (i = 0; i < count-5 && get_bits_left(&s->gb) > 0;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0);
+        for (i = 0; i < count-VLC_MULTI_MAX_SYMBOLS+1 && get_bits_left(&s->gb) > 0;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0, MULTI8b);
         }
     } else {
-        for (i = 0; i < count-5;) {
-            READ_2PIX_PLANE(s->temp[0], i, 0);
+        for (i = 0; i < count-VLC_MULTI_MAX_SYMBOLS+1;) {
+            READ_2PIX_PLANE(s->temp[0], i, 0, MULTI8b);
         }
     }
     for (; i < count && get_bits_left(&s->gb) > 0; i++)
@@ -628,12 +621,12 @@ static void decode_plane_bitstream(HYuvContext *s, int width, int plane)
         decode_gray_bitstream(s, width);
     } else if (s->bps <= 14) {
         if (width >= get_bits_left(&s->gb) / 32) {
-            for (i = 0; i < width-2 && get_bits_left(&s->gb) > 0;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane);
+            for (i = 0; i < width-VLC_MULTI_MAX_SYMBOLS+1 && get_bits_left(&s->gb) > 0;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane, MULTI16b);
             }
         } else {
-            for (i = 0; i < width-2;) {
-                READ_2PIX_PLANE(s->temp16[0], i, plane);
+            for (i = 0; i < width-VLC_MULTI_MAX_SYMBOLS+1;) {
+                READ_2PIX_PLANE(s->temp16[0], i, plane, MULTI16b);
             }
         }
         for (; i < width && get_bits_left(&s->gb) > 0; i++)

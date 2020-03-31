@@ -87,7 +87,7 @@ typedef struct HYuvContext {
     uint32_t bits[4][MAX_VLC_N];
     uint32_t pix_bgr_map[1<<VLC_BITS];
     VLC vlc[8];                             //Y,U,V,A,YY,YU,YV,AA
-    VLC_MULTI *(multi[4]);
+    VLC_MULTI multi[4];
     uint8_t *bitstream_buffer;
     unsigned int bitstream_buffer_size;
     BswapDSPContext bdsp;

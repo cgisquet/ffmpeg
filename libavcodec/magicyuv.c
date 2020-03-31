@@ -72,7 +72,7 @@ typedef struct MagicYUVContext {
     unsigned int      slices_size[4]; // slice sizes for each plane
     uint8_t           len[4][4096];   // table of code lengths for each plane
     VLC               vlc[4];         // VLC for each plane
-    VLC_MULTI       *(multi[4]);      // Buffer for joint VLC data
+    VLC_MULTI         multi[4];      // Buffer for joint VLC data
     int (*huff_build)(VLC *vlc, VLC_MULTI *table, uint8_t *len, int mask);
     int (*magy_decode_slice)(AVCodecContext *avctx, void *tdata,
                              int j, int threadnr);
@@ -232,9 +232,9 @@ static void magicyuv_median_pred16(uint16_t *dst, const uint16_t *src1,
     *left_top = lt;
 }
 
-#define READ_2PIX_PLANE(dst, off, plane) \
+#define READ_2PIX_PLANE(dst, off, plane, OP) \
     GET_VLC_MULTI(dst, off, &gb, s->multi[plane], \
-                 s->vlc[plane].table, VLC_BITS, 3)
+                 s->vlc[plane].table, VLC_BITS, 3, OP)
 
 static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
                                int j, int threadnr)
@@ -278,12 +278,12 @@ static int magy_decode_slice10(AVCodecContext *avctx, void *tdata,
         } else {
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-3 && get_bits_left(&gb) > 0;) {
-                        READ_2PIX_PLANE(dst, x, i);
+                    for (x = 0; x < width-VLC_MULTI_MAX_SYMBOLS+1 && get_bits_left(&gb) > 0;) {
+                        READ_2PIX_PLANE(dst, x, i, MULTI16b);
                     }
                 } else {
-                    for (x = 0; x < width-3;) {
-                        READ_2PIX_PLANE(dst, x, i);
+                    for (x = 0; x < width-VLC_MULTI_MAX_SYMBOLS+1;) {
+                        READ_2PIX_PLANE(dst, x, i, MULTI16b);
                     }
                 }
                 for (; x < width && get_bits_left(&gb) > 0; x++)
@@ -408,12 +408,12 @@ static int magy_decode_slice(AVCodecContext *avctx, void *tdata,
         } else {
             for (k = 0; k < height; k++) {
                 if (width >= get_bits_left(&gb) / 32) {
-                    for (x = 0; x < width-5 && get_bits_left(&gb) > 0;) {
-                        READ_2PIX_PLANE(dst, x, i);
+                    for (x = 0; x < width-VLC_MULTI_MAX_SYMBOLS+1 && get_bits_left(&gb) > 0;) {
+                        READ_2PIX_PLANE(dst, x, i, MULTI8b);
                     }
                 } else {
-                    for (x = 0; x < width-5;) {
-                        READ_2PIX_PLANE(dst, x, i);
+                    for (x = 0; x < width-VLC_MULTI_MAX_SYMBOLS+1;) {
+                        READ_2PIX_PLANE(dst, x, i, MULTI8b);
                     }
                 }
                 for (; x < width && get_bits_left(&gb) > 0; x++)
@@ -518,7 +518,7 @@ static int build_huffman(AVCodecContext *avctx, GetBitContext *gbit, int max)
         j += l;
         if (j == max) {
             j = 0;
-            if (s->huff_build(&s->vlc[i], s->multi[i], s->len[i], s->vlc_n)) {
+            if (s->huff_build(&s->vlc[i], s->multi+i, s->len[i], s->vlc_n)) {
                 av_log(avctx, AV_LOG_ERROR, "Cannot build Huffman codes\n");
                 return AVERROR_INVALIDDATA;
             }
@@ -781,13 +781,8 @@ static int magy_decode_frame(AVCodecContext *avctx, void *data,
 static av_cold int magy_decode_init(AVCodecContext *avctx)
 {
     MagicYUVContext *s = avctx->priv_data;
-    int i;
     ff_llviddsp_init(&s->llviddsp);
-    for (i = 0; i < 4; i++) {
-        s->multi[i] = av_malloc(sizeof(VLC_MULTI)<<VLC_BITS);
-        if (!s->multi[i])
-            return AVERROR(ENOMEM);
-    }
+    memset(s->multi, 0, sizeof(s->multi));
 
     return 0;
 }
@@ -803,7 +798,7 @@ static av_cold int magy_decode_end(AVCodecContext *avctx)
     }
     for (i = 0; i < 4; i++) {
         ff_free_vlc(&s->vlc[i]);
-        av_freep(s->multi+i);
+        ff_huff_multi_free(s->multi+i);
     }
 
     return 0;

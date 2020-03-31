@@ -143,85 +143,100 @@ end:
                               bits, 2, 2, symbols, 2, 2, 0);
 }
 
-static void add_level(VLC_MULTI* table, const int num, const int numbits,
-                      const uint32_t* bits, const uint8_t* len,
-                      const uint16_t* lut, const int mode,
-                      uint32_t curcode, int curlen,
-                      int curlimit, int curlevel,
-                      const int minlen, const int max,
-                      unsigned* levelcnt, VLC_MULTI *info)
+static unsigned
+add_level(VLC_MULTI* table, const int num, const int numbits,
+          const uint32_t* bits, const uint8_t* len,
+          const uint16_t* lut, const int mode,
+          uint32_t curcode, int curlen,
+          int curlimit, int curlevel,
+          const int minlen, const int max,
+          unsigned* levelcnt, uint8_t data[16],
+          unsigned pos)
 {
     int t, l;
     uint32_t code;
     if (mode == 2) {
         int i, j;
-        if (num > 256 && curlevel > 2)
-            return; // No room
         for (i = 0; i < max; i++) {
             for (j = 0; j < 2; j++) {
                 int idx, newlimit;
                 t = j ? num-1-i : i;
                 idx = lut ? lut[t] : t;
                 l = len[idx];
-                if (l > curlimit)
-                    return;
+                if (l > curlimit || pos+curlevel+1 > 0xFFFF)
+                    return pos;
                 code = (curcode << l) + bits[idx];
                 newlimit = curlimit - l;
                 l  += curlen;
-                if (num > 256) AV_WN16(info->val+2*curlevel, t);
-                else info->val[curlevel] = t&0xFF;
 
-                if (curlevel) { // let's not add single entries
+                // Set data to write and store it
+                if (num > 256) {
+                    AV_WN16(data+2*curlevel, t);
+                    AV_COPY64U(table->val+2*pos, data);
+                } else {
+                    data[curlevel] = t;
+                    AV_COPY64U(table->val+pos, data);
+                }
+
+                // Fill LUT
+                if (curlevel) {
+                    VLC_ENTRY entry = { pos, l, curlevel+1 };
                     uint32_t val = (code << (32 - l)) >> (32 - numbits);
-                    uint32_t  nb = val + (1U << (numbits - l));
-                    info->len = l;
-                    info->num = curlevel+1;
+                    uint32_t nb = val + (1U << (numbits - l));
                     for (; val < nb; val++)
-                        AV_COPY64(table+val, info);
+                        table->entries[val] = entry;
+
                     levelcnt[curlevel-1]++;
+                    pos += curlevel+1;
                 }
 
                 if (curlevel+1 < VLC_MULTI_MAX_SYMBOLS && newlimit >= minlen) {
-                    add_level(table, num, numbits,
-                              bits, len, lut, mode,
-                              code, l, newlimit, curlevel+1,
-                              minlen, max, levelcnt, info);
+                    pos = add_level(table, num, numbits,
+                                    bits, len, lut, mode,
+                                    code, l, newlimit, curlevel+1,
+                                    minlen, max, levelcnt, data, pos);
                 }
             }
         }
     } else {
-        if (max > 256 && curlevel > 2)
-            return; // No room
         for (t = 0; t < max; t++) {
             int newlimit, idx = lut ? lut[t] : t;
             l = len[idx];
-            if (l > curlimit)
-                return;
+            if (l > curlimit || pos+curlevel+1 > 0xFFFF)
+                return pos;
             code = (curcode << l) + bits[idx];
-            if (max > 256) AV_WN16(info->val+2*curlevel, t);
-            else info->val[curlevel] = t&0xFF;
 
-            if (curlevel) { // let's not add single entries
-                uint32_t val = (code << (32 - l)) >> (32 - numbits);
-                int       nb = val + (1 << (numbits - l));
-                info->len = l+curlen;
-                info->num = curlevel+1;
-                for (; val < nb; val++)
-                    AV_COPY64(table+val, info);
-                levelcnt[curlevel-1]++;
+            // Set data to write and store it
+            if (num > 256) {
+                AV_WN16(data+2*curlevel, t);
+                AV_COPY64U(table->val+2*pos, data);
+            } else {
+                data[curlevel] = t;
+                AV_COPY64U(table->val+pos, data);
             }
 
-            newlimit = curlimit - l;
+            // Fill LUT
+            if (curlevel) {
+                VLC_ENTRY entry = { pos, l, curlevel+1 };
+                uint32_t val = (code << (32 - l)) >> (32 - numbits);
+                uint32_t nb = val + (1U << (numbits - l));
+                for (; val < nb; val++)
+                    table->entries[val] = entry;
+
+                levelcnt[curlevel-1]++;
+                pos += curlevel+1;
+            }
+
             if (curlevel+1 < VLC_MULTI_MAX_SYMBOLS && newlimit >= minlen) {
-                add_level(table, num, numbits,
-                          bits, len, lut, mode,
-                          code, l, newlimit, curlevel+1,
-                          minlen, max, levelcnt, info);
+                pos = add_level(table, num, numbits,
+                                bits, len, lut, mode,
+                                code, l, newlimit, curlevel+1,
+                                minlen, max, levelcnt, data, pos);
             }
         }
     }
 
-    return;
+    return pos;
 }
 
 int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
@@ -230,15 +245,61 @@ int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
                       const uint16_t* lut, int mode)
 {
     int j, min = 32, max = 0;
-    unsigned count[VLC_MULTI_MAX_SYMBOLS-1] = { 0, };
-    VLC_MULTI info = { { 0, }, 0, };
+    unsigned count[VLC_MULTI_MAX_SYMBOLS] = { 0, };
+    uint8_t info[16] = { 0, };
+    unsigned pos = 1;
+    VLC_ENTRY entry;
+
+    if (!table->val) {
+        table->val = av_malloc((0x10000+VLC_MULTI_MAX_SYMBOLS) * (num>256?2:1));
+        if (!table->val)
+            return AVERROR(ENOMEM);
+    }
+    if (!table->entries) {
+        table->entries = av_malloc(sizeof(VLC_ENTRY)<<numbits);
+        if (!table->entries) {
+            av_freep(&table->val);
+            return AVERROR(ENOMEM);
+        }
+    }
+
+    for (j = 0; j < 1<<numbits; j++) {
+        int len = single->table[j][1];
+        table->entries[j].len = len;
+        if (len > 0) {
+            table->entries[j].num = 1;
+            // should be overwritten, and if not, easy to check
+            table->entries[j].offset = 0;
+        } else {
+            table->entries[j].num = 0;
+            table->entries[j].offset = single->table[j][0];
+        }
+    }
 
     for (j = 0; j < num; j++) {
-        int idx = lut ? lut[j] : j;
+        int l, idx = lut ? lut[j] : j;
+        uint32_t val, nb;
+
         if (idx == 0xFFFF)
             continue;
-        if (len[idx] >= 1 && len[idx] < min)
+        l = len[idx];
+        if (!l || l > numbits)
+            continue;
+        if (l < min)
             min = len[idx];
+
+        entry = (VLC_ENTRY){ pos, l, 1 };
+        val = (bits[idx] << (32 - l)) >> (32 - numbits);
+        nb = val + (1U << (numbits - l));
+        for (; val < nb; val++)
+            table->entries[val] = entry;
+
+        if (num > 256) {
+            AV_WN16(table->val+2*pos, j);
+        } else {
+            table->val[pos] = j;
+        }
+        pos++;
     }
 
     if (mode == 2) {
@@ -261,17 +322,18 @@ int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
     }
 
 end:
-    for (j = 0; j < 1<<numbits; j++) {
-        table[j].len = single->table[j][1];
-        table[j].num = single->table[j][1] > 0 ? 1 : 0;
-        AV_WN16(table[j].val, single->table[j][0]);
-    }
+    pos = add_level(table, num, numbits, bits, len, lut, mode,
+                    0, 0, numbits, 0, min, max, count, info,
+                    pos /* kept free for debugging */);
 
-    add_level(table, num, numbits, bits, len, lut, mode,
-              0, 0, numbits, 0, min, max, count, &info);
-
-    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d/%d/%d/%d codes min=%ubits max=%u\n",
-           count[0], count[1], count[2], count[3], count[4], min, max);
+    av_log(NULL, AV_LOG_DEBUG, "Joint: %d/%d/%d/%d/%d/%d/%d codes (total %u) min=%ubits max=%u\n",
+           count[0], count[1], count[2], count[3], count[4], count[5], count[6], pos, min, max);
 
     return 0;
+}
+
+void ff_huff_multi_free(VLC_MULTI* table)
+{
+    av_freep(&table->val);
+    av_freep(&table->entries);
 }

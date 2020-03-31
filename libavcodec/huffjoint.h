@@ -122,23 +122,28 @@ int ff_huff_joint_gen(VLC *vlc, void *array, int num, int numbits,
                       const uint16_t* lut0, const uint16_t* lut1,
                       int mode);
 
-#define VLC_MULTI_MAX_SYMBOLS  6
+#define VLC_MULTI_MAX_SYMBOLS  8
+
+typedef struct VLC_ENTRY {
+    uint16_t offset;
+    int8_t   len; // -31,32
+    uint8_t  num;
+} VLC_ENTRY;
 
 typedef struct VLC_MULTI {
-    uint8_t val[6];
-    int8_t len; // -31,32
-    uint8_t num;
+    uint8_t* val;
+    VLC_ENTRY* entries; // 1<<number of bits
 } VLC_MULTI;
 
-#define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth) \
+#define GET_VLC_MULTI(dst, off, gb, Jtable, table, bits, max_depth, OP) \
     do {                                                            \
         unsigned int index = show_bits(gb, bits);                   \
-        int nb_bits, code, n = Jtable[index].len;                   \
-        if (Jtable[index].num) {                                    \
-            AV_COPY64(dst+off, Jtable[index].val);                  \
-            off += Jtable[index].num;                               \
+        int nb_bits, code, n = Jtable.entries[index].len;           \
+        if (Jtable.entries[index].num) {                            \
+            OP(dst+off, Jtable.val, Jtable.entries[index].offset);  \
+            off += Jtable.entries[index].num;                       \
         } else {                                                    \
-            code = AV_RN16(Jtable[index].val);                      \
+            code = Jtable.entries[index].offset;                    \
             skip_remaining(gb, bits);                               \
             code = set_idx(gb, code, &n, &nb_bits, table);          \
             if (max_depth > 2 && n < 0) {                           \
@@ -150,9 +155,14 @@ typedef struct VLC_MULTI {
         skip_remaining(gb, n);                                      \
     } while (0)
 
+#define MULTI8b(optr, iptr, _off) AV_COPY64U(optr, iptr + _off)
+#define MULTI16b(optr, iptr, _off) AV_COPY128U(optr, iptr + 2*(int)_off)
+
 int ff_huff_multi_gen(VLC_MULTI* table, const VLC *single,
                       int num, int numbits,
                       const uint32_t* bits, const uint8_t* len,
                       const uint16_t* lut, int mode);
+
+void ff_huff_multi_free(VLC_MULTI* table);
 
 #endif /* AVCODEC_HUFF_JOINT_H */

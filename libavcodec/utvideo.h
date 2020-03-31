@@ -31,6 +31,7 @@
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "utvideodsp.h"
+#include "huffjoint.h"
 #include "lossless_videodsp.h"
 #include "lossless_videoencdsp.h"
 
@@ -84,7 +85,7 @@ typedef struct UtvideoContext {
     ptrdiff_t slice_stride;
     uint8_t *slice_bits, *slice_buffer[4];
     void    *buffer;
-    void    *multi_vlc;
+    VLC_MULTI multi_vlc;
     int      slice_bits_size;
 
     const uint8_t *packed_stream[4][256];
