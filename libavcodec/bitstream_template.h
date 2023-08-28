@@ -26,6 +26,34 @@
 #   define BS_SUFFIX_UPPER BE
 #endif
 
+#ifndef BITSTREAM_BITS
+# if HAVE_FAST_64BIT || defined(LONG_BITSTREAM_READER)
+#   define BITSTREAM_BITS   64
+# else
+#   define BITSTREAM_BITS   32
+# endif
+#endif
+
+#if BITSTREAM_BITS == 64
+# define BITSTREAM_HBITS  32
+typedef uint64_t cache_type;
+# define AV_RB_ALL  AV_RB64
+# define AV_RL_ALL  AV_RL64
+# define AV_RB_HALF AV_RB32
+# define AV_RL_HALF AV_RL32
+# define CACHE_TYPE(a) UINT64_C(a)
+#else
+# define BITSTREAM_HBITS  16
+typedef uint32_t cache_type;
+# define AV_RB_ALL  AV_RB32
+# define AV_RL_ALL  AV_RL32
+# define AV_RB_HALF AV_RB16
+# define AV_RL_HALF AV_RL16
+# define CACHE_TYPE(a) UINT32_C(a)
+#endif
+
+#define MIN_CACHE_BITS (BITSTREAM_BITS-7)
+
 #define BS_JOIN(x, y, z) x ## y ## z
 #define BS_JOIN3(x, y, z) BS_JOIN(x, y, z)
 #define BS_FUNC(x) BS_JOIN3(bits_, x, BS_SUFFIX_LOWER)
@@ -33,7 +61,7 @@
 #define BSCTX BS_JOIN3(Bitstream, Context, BS_SUFFIX_UPPER)
 
 typedef struct BSCTX {
-    uint64_t bits;       // stores bits read from the buffer
+    cache_type bits;     // stores bits read from the buffer
     const uint8_t *buffer, *buffer_end;
     const uint8_t *ptr;  // pointer to the position inside a buffer
     unsigned bits_valid; // number of bits left in bits field
@@ -47,7 +75,7 @@ typedef struct BSCTX {
  *
  * Always succeeds when UNCHECKED_BITSTREAM_READER is enabled.
  */
-static inline int BS_FUNC(priv_refill_64)(BSCTX *bc)
+static inline int BS_FUNC(priv_refill_all)(BSCTX *bc)
 {
 #if !UNCHECKED_BITSTREAM_READER
     if (bc->ptr >= bc->buffer_end)
@@ -55,12 +83,12 @@ static inline int BS_FUNC(priv_refill_64)(BSCTX *bc)
 #endif
 
 #ifdef BITSTREAM_TEMPLATE_LE
-    bc->bits       = AV_RL64(bc->ptr);
+    bc->bits       = AV_RL_ALL(bc->ptr);
 #else
-    bc->bits       = AV_RB64(bc->ptr);
+    bc->bits       = AV_RB_ALL(bc->ptr);
 #endif
-    bc->ptr       += 8;
-    bc->bits_valid = 64;
+    bc->ptr       += BITSTREAM_BITS / 8;
+    bc->bits_valid = BITSTREAM_BITS;
 
     return 0;
 }
@@ -72,20 +100,32 @@ static inline int BS_FUNC(priv_refill_64)(BSCTX *bc)
  *
  * Always succeeds when UNCHECKED_BITSTREAM_READER is enabled.
  */
-static inline int BS_FUNC(priv_refill_32)(BSCTX *bc)
+static inline int BS_FUNC(priv_refill_half)(BSCTX *bc)
 {
 #if !UNCHECKED_BITSTREAM_READER
     if (bc->ptr >= bc->buffer_end)
         return -1;
 #endif
 
-#ifdef BITSTREAM_TEMPLATE_LE
-    bc->bits      |= (uint64_t)AV_RL32(bc->ptr) << bc->bits_valid;
-#else
-    bc->bits      |= (uint64_t)AV_RB32(bc->ptr) << (32 - bc->bits_valid);
+#if BITSTREAM_BITS == 32
+    if (s->bits_valid > 16) {
+        if (is_le)
+        s->bits |= (uint32_t)bc->ptr[0] << bc->bits_valid;
+        else
+        s->bits |= (uint32_t)bc->ptr[0] << (32 - bc->bits_valid);
+        s->ptr++;
+        s->bits_valid += 8;
+        return;
+    }
 #endif
-    bc->ptr        += 4;
-    bc->bits_valid += 32;
+
+#ifdef BITSTREAM_TEMPLATE_LE
+    bc->bits      |= (cache_type)AV_RL_HALF(bc->ptr) << bc->bits_valid;
+#else
+    bc->bits      |= (cache_type)AV_RB_HALF(bc->ptr) << (BITSTREAM_HBITS - bc->bits_valid);
+#endif
+    bc->ptr        += BITSTREAM_HBITS / 8;
+    bc->bits_valid += BITSTREAM_HBITS;
 
     return 0;
 }
@@ -119,7 +159,7 @@ static inline int BS_FUNC(init)(BSCTX *bc, const uint8_t *buffer,
     bc->bits_valid   = 0;
     bc->bits         = 0;
 
-    BS_FUNC(priv_refill_64)(bc);
+    BS_FUNC(priv_refill_half)(bc);
 
     return 0;
 }
@@ -164,14 +204,14 @@ static inline int BS_FUNC(left)(const BSCTX *bc)
     return (bc->buffer - bc->ptr) * 8 + bc->size_in_bits + bc->bits_valid;
 }
 
-static inline uint64_t BS_FUNC(priv_val_show)(BSCTX *bc, unsigned int n)
+static inline cache_type BS_FUNC(priv_val_show)(BSCTX *bc, unsigned int n)
 {
-    av_assert2(n > 0 && n <= 64);
+    av_assert2(n > 0 && n <= MIN_CACHE_BITS);
 
 #ifdef BITSTREAM_TEMPLATE_LE
-    return bc->bits & (UINT64_MAX >> (64 - n));
+    return bc->bits & ((CACHE_TYPE(1) << n) - 1);
 #else
-    return bc->bits >> (64 - n);
+    return bc->bits >> (BITSTREAM_BITS - n);
 #endif
 }
 
@@ -185,11 +225,11 @@ static inline void BS_FUNC(skip_remaining)(BSCTX *bc, unsigned int n)
     bc->bits_valid -= n;
 }
 
-static inline uint64_t BS_FUNC(priv_val_get)(BSCTX *bc, unsigned int n)
+static inline cache_type BS_FUNC(priv_val_get)(BSCTX *bc, unsigned int n)
 {
-    uint64_t ret;
+    cache_type ret;
 
-    av_assert2(n > 0 && n < 64);
+    av_assert2(n > 0 && n < MIN_CACHE_BITS);
 
     ret = BS_FUNC(priv_val_show)(bc, n);
     BS_FUNC(skip_remaining)(bc, n);
@@ -202,7 +242,7 @@ static inline uint64_t BS_FUNC(priv_val_get)(BSCTX *bc, unsigned int n)
  */
 static inline unsigned int BS_FUNC(read_bit)(BSCTX *bc)
 {
-    if (!bc->bits_valid && BS_FUNC(priv_refill_64)(bc) < 0)
+    if (!bc->bits_valid && BS_FUNC(priv_refill_all)(bc) < 0)
         return 0;
 
     return BS_FUNC(priv_val_get)(bc, 1);
@@ -218,7 +258,7 @@ static inline uint32_t BS_FUNC(read_nz)(BSCTX *bc, unsigned int n)
     av_assert2(n > 0 && n <= 32);
 
     if (n > bc->bits_valid) {
-        if (BS_FUNC(priv_refill_32)(bc) < 0)
+        if (BS_FUNC(priv_refill_half)(bc) < 0)
             bc->bits_valid = n;
     }
 
@@ -258,9 +298,23 @@ static inline uint64_t BS_FUNC(read_63)(BSCTX *bc, unsigned int n)
         if (left)
             ret = BS_FUNC(priv_val_get)(bc, left);
 
-        if (BS_FUNC(priv_refill_64)(bc) < 0)
+        if (BS_FUNC(priv_refill_all)(bc) < 0)
             bc->bits_valid = n;
+#if BITSTREAM_BITS == 32
+        else if (n > 32) {
+            left = bc->bits_valid;
+            n   -= 32;
 
+# ifdef BITSTREAM_TEMPLATE_LE
+            ret = BS_FUNC(priv_val_get)(bc, 32) << left | ret;
+# else
+            ret = BS_FUNC(priv_val_get)(bc, 32) | ret << n;
+# endif
+
+            if (BS_FUNC(priv_refill_all)(bc) < 0)
+                bc->bits_valid = n;
+        }
+#endif
     }
 
 #ifdef BITSTREAM_TEMPLATE_LE
@@ -324,7 +378,7 @@ static inline uint32_t BS_FUNC(peek_nz)(BSCTX *bc, unsigned int n)
     av_assert2(n > 0 && n <= 32);
 
     if (n > bc->bits_valid)
-        BS_FUNC(priv_refill_32)(bc);
+        BS_FUNC(priv_refill_half)(bc);
 
     return BS_FUNC(priv_val_show)(bc, n);
 }
@@ -381,13 +435,13 @@ static inline void BS_FUNC(skip)(BSCTX *bc, unsigned int n)
         bc->bits       = 0;
         bc->bits_valid = 0;
 
-        if (n >= 64) {
+        if (n >= BITSTREAM_BITS) {
             unsigned int skip = n / 8;
 
             n -= skip * 8;
             bc->ptr += skip;
         }
-        BS_FUNC(priv_refill_64)(bc);
+        BS_FUNC(priv_refill_all)(bc);
         if (n)
             BS_FUNC(skip_remaining)(bc, n);
     }
