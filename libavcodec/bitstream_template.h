@@ -423,8 +423,18 @@ static inline const uint8_t *BS_FUNC(align)(BSCTX *bc)
  */
 static inline int BS_FUNC(read_xbits)(BSCTX *bc, unsigned int n)
 {
-    int32_t cache = BS_FUNC(peek)(bc, 32);
-    int sign = ~cache >> 31;
+    int32_t cache;
+    int sign;
+
+    if (n > bc->bits_valid)
+        BS_FUNC(priv_refill_32)(bc);
+
+#if defined(BITSTREAM_READER_LE)
+    cache = bc->bits & 0xFFFFFFFF;
+#else
+    cache = bc->bits >> 32;
+#endif
+    sign = ~cache >> 31;
     BS_FUNC(skip_remaining)(bc, n);
 
     return ((((uint32_t)(sign ^ cache)) >> (32 - n)) ^ sign) - sign;
