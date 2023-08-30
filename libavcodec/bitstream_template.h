@@ -175,7 +175,7 @@ static inline uint64_t BS_FUNC(priv_val_show)(BSCTX *bc, unsigned int n)
 #endif
 }
 
-static inline void BS_FUNC(priv_skip_remaining)(BSCTX *bc, unsigned int n)
+static inline void BS_FUNC(skip_remaining)(BSCTX *bc, unsigned int n)
 {
 #ifdef BITSTREAM_TEMPLATE_LE
     bc->bits >>= n;
@@ -192,7 +192,7 @@ static inline uint64_t BS_FUNC(priv_val_get)(BSCTX *bc, unsigned int n)
     av_assert2(n > 0 && n < 64);
 
     ret = BS_FUNC(priv_val_show)(bc, n);
-    BS_FUNC(priv_skip_remaining)(bc, n);
+    BS_FUNC(skip_remaining)(bc, n);
 
     return ret;
 }
@@ -375,7 +375,7 @@ static inline int BS_FUNC(peek_signed)(BSCTX *bc, unsigned int n)
 static inline void BS_FUNC(skip)(BSCTX *bc, unsigned int n)
 {
     if (n < bc->bits_valid)
-        BS_FUNC(priv_skip_remaining)(bc, n);
+        BS_FUNC(skip_remaining)(bc, n);
     else {
         n -= bc->bits_valid;
         bc->bits       = 0;
@@ -389,7 +389,7 @@ static inline void BS_FUNC(skip)(BSCTX *bc, unsigned int n)
         }
         BS_FUNC(priv_refill_64)(bc);
         if (n)
-            BS_FUNC(priv_skip_remaining)(bc, n);
+            BS_FUNC(skip_remaining)(bc, n);
     }
 }
 
@@ -425,7 +425,7 @@ static inline int BS_FUNC(read_xbits)(BSCTX *bc, unsigned int n)
 {
     int32_t cache = BS_FUNC(peek)(bc, 32);
     int sign = ~cache >> 31;
-    BS_FUNC(priv_skip_remaining)(bc, n);
+    BS_FUNC(skip_remaining)(bc, n);
 
     return ((((uint32_t)(sign ^ cache)) >> (32 - n)) ^ sign) - sign;
 }
@@ -508,14 +508,14 @@ static inline int BS_FUNC(read_vlc)(BSCTX *bc, const VLCElem *table,
     int n        = table[idx].len;
 
     if (max_depth > 1 && n < 0) {
-        BS_FUNC(priv_skip_remaining)(bc, bits);
+        BS_FUNC(skip_remaining)(bc, bits);
         code = BS_FUNC(priv_set_idx)(bc, code, &n, &nb_bits, table);
         if (max_depth > 2 && n < 0) {
-            BS_FUNC(priv_skip_remaining)(bc, nb_bits);
+            BS_FUNC(skip_remaining)(bc, nb_bits);
             code = BS_FUNC(priv_set_idx)(bc, code, &n, &nb_bits, table);
         }
     }
-    BS_FUNC(priv_skip_remaining)(bc, n);
+    BS_FUNC(skip_remaining)(bc, n);
 
     return code;
 }
@@ -534,17 +534,17 @@ static inline int BS_FUNC(read_vlc_multi)(BSCTX *bc, uint8_t *dst,
         code = table[idx].sym;
         n = table[idx].len;
         if (max_depth > 1 && n < 0) {
-            BS_FUNC(priv_skip_remaining)(bc, bits);
+            BS_FUNC(skip_remaining)(bc, bits);
             code = BS_FUNC(priv_set_idx)(bc, code, &n, &nb_bits, table);
             if (max_depth > 2 && n < 0) {
-                BS_FUNC(priv_skip_remaining)(bc, nb_bits);
+                BS_FUNC(skip_remaining)(bc, nb_bits);
                 code = BS_FUNC(priv_set_idx)(bc, code, &n, &nb_bits, table);
             }
         }
         AV_WN16(dst, code);
         ret = n > 0;
     }
-    BS_FUNC(priv_skip_remaining)(bc, n);
+    BS_FUNC(skip_remaining)(bc, n);
 
     return ret;
 }

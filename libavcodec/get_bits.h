@@ -79,6 +79,7 @@ typedef BitstreamContext GetBitContext;
 #define get_bits_left       bits_left
 #define skip_bits_long      bits_skip
 #define skip_bits           bits_skip
+#define skip_remaining      bits_skip_remaining
 #define get_bits            bits_read_nz
 #define get_bitsz           bits_read
 #define get_bits_long       bits_read
