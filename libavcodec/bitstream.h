@@ -95,6 +95,7 @@
 # define bits_peek_signed   bits_peek_signed_le
 # define bits_peek_signed_nz bits_peek_signed_nz_le
 # define bits_skip          bits_skip_le
+# define bits_skip_remaining bits_skip_remaining_le
 # define bits_seek          bits_seek_le
 # define bits_align         bits_align_le
 # define bits_read_xbits    bits_read_xbits_le
@@ -124,6 +125,7 @@
 # define bits_peek_signed   bits_peek_signed_be
 # define bits_peek_signed_nz bits_peek_signed_nz_be
 # define bits_skip          bits_skip_be
+# define bits_skip_remaining bits_skip_remaining_be
 # define bits_seek          bits_seek_be
 # define bits_align         bits_align_be
 # define bits_read_xbits    bits_read_xbits_be
@@ -146,7 +148,7 @@
         n     = table[index].len;                           \
                                                             \
         if (max_depth > 1 && n < 0) {                       \
-            bits_skip(bc, bits);                            \
+            skip_remaining(bc, bits);                       \
                                                             \
             nb_bits = -n;                                   \
                                                             \
@@ -154,7 +156,7 @@
             level = table[index].level;                     \
             n     = table[index].len;                       \
             if (max_depth > 2 && n < 0) {                   \
-                bits_skip(bc, nb_bits);                     \
+                skip_remaining(bc, nb_bits);                \
                 nb_bits = -n;                               \
                                                             \
                 index = bits_peek(bc, nb_bits) + level;     \
@@ -163,7 +165,7 @@
             }                                               \
         }                                                   \
         run = table[index].run;                             \
-        bits_skip(bc, n);                                   \
+        skip_remaining(bc, n);                              \
     } while (0)
 
 #endif /* AVCODEC_BITSTREAM_H */
