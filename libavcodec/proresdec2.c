@@ -138,8 +138,16 @@ static const uint8_t ac_info[] = { 0x04, 0x0A, 0x05, 0x06, 0x28, 0x29 };
 static VLC ac_vlc[FF_ARRAY_ELEMS(ac_info)];
 static VLCElem vlc_buf[30384];
 
+#define MAX_RUN_VLC 15
+#define MAX_LEVEL_VLC 9
+
+static VLCElem* lvl_tbl[MAX_LEVEL_VLC];
+static VLCElem* run_tbl[MAX_RUN_VLC];
+
 static av_cold void init_vlcs(void)
 {
+    static const uint8_t run_to_tbl[MAX_RUN_VLC] = { 3, 3, 2, 2, 0, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4 };
+    static const uint8_t lvl_to_tbl[MAX_LEVEL_VLC] = { 0, 1, 2, 3, 0, 4, 4, 4, 4 };
     int offset = 0;
     for (int i = 0; i < FF_ARRAY_ELEMS(ac_info); i++) {
         uint32_t ac_codes[1<<AC_BITS];
@@ -182,6 +190,13 @@ static av_cold void init_vlcs(void)
                  ac_codes, 4, 4, INIT_VLC_STATIC_OVERLONG);
         offset += ac_vlc[i].table_size;
     }
+
+    // The following could be determined once for all, but as a change in VLC
+    // would require changing them, leave the cheap dynamic determination
+    for (int i = 0; i < FF_ARRAY_ELEMS(lvl_tbl); i++)
+        lvl_tbl[i] = ac_vlc[lvl_to_tbl[i]].table;
+    for (int i = 0; i < FF_ARRAY_ELEMS(run_tbl); i++)
+        run_tbl[i] = ac_vlc[run_to_tbl[i]].table;
 }
 
 static av_cold int decode_init(AVCodecContext *avctx)
@@ -586,9 +601,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
             break;
 
         if (run < 15) {
-            static const uint8_t ctx_to_tbl[] = { 3, 3, 2, 2, 0, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4 };
-            const VLC* tbl = ac_vlc + ctx_to_tbl[run];
-            run = get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
+            run = get_vlc2(gb, run_tbl[run], PRORES_LEV_BITS, 3);
         } else {
             unsigned int bits = 21 - 2*av_log2(show_bits(gb, 10));
             run = READ_BITS(gb, bits) - 4; // up to 17 bits
@@ -600,9 +613,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
         }
 
         if (level < 9) {
-            static const uint8_t ctx_to_tbl[] = { 0, 1, 2, 3, 0, 4, 4, 4, 4 };
-            const VLC* tbl = ac_vlc + ctx_to_tbl[level];
-            level = 1+get_vlc2(gb, tbl->table, PRORES_LEV_BITS, 3);
+            level = 1+get_vlc2(gb, lvl_tbl[level], PRORES_LEV_BITS, 3);
         } else {
             unsigned int bits = 25 - 2*av_log2(show_bits(gb, 12));
             level = READ_BITS(gb, bits) - 4 + 1; // up to 21 bits
