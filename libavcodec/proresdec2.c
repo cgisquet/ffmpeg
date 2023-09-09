@@ -24,6 +24,8 @@
  * Known FOURCCs: 'apch' (HQ), 'apcn' (SD), 'apcs' (LT), 'apco' (Proxy), 'ap4h' (4444), 'ap4x' (4444 XQ)
  */
 
+#define CACHED_BITSTREAM_READER 1
+
 #include "config_components.h"
 
 #include "libavutil/internal.h"
@@ -444,11 +446,11 @@ static int decode_picture_header(AVCodecContext *avctx, const uint8_t *buf, cons
             val = READ_BITS(gb, bits) - (1 << exp_order) +              \
                 ((switch_bits + 1) << rice_order);                      \
         } else if (rice_order) {                                        \
-            skip_bits(gb, q+1);                                         \
+            skip_remaining(gb, q+1);                                    \
             val = (q << rice_order) + get_bits(gb, rice_order);         \
         } else {                                                        \
             val = q;                                                    \
-            skip_bits(gb, q+1);                                         \
+            skip_remaining(gb, q+1);                                    \
         }                                                               \
     } while (0)
 
@@ -503,7 +505,7 @@ static av_always_inline int decode_ac_coeffs(AVCodecContext *avctx, GetBitContex
 
     for (pos = block_mask;;) {
         bits_rem = get_bits_left(gb);
-        if (!bits_rem || (bits_rem < 16 && !show_bits(gb, bits_rem)))
+        if (bits_rem <= 0 || (bits_rem < 16 && !show_bits(gb, bits_rem)))
             break;
 
         DECODE_CODEWORD(run, run_to_cb[FFMIN(run,  15)]);
