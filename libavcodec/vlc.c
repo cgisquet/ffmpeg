@@ -77,7 +77,8 @@ static int alloc_table(VLC *vlc, int size, int use_static)
     return index;
 }
 
-#define LOCALBUF_ELEMS 1500 // the maximum currently needed is 1296 by rv34
+// rv34 has 1296, prores 2^12 (maximum coefficient level)
+#define LOCALBUF_ELEMS 4096
 
 static av_always_inline uint32_t bitswap_32(uint32_t x)
 {
